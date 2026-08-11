@@ -57,15 +57,19 @@ try {
       }
       console.info(JSON.stringify({ outputPath, ...result }, null, 2));
       process.exitCode = 0;
+    } else if (smoke === "on-demand") {
+      const onDemand = await measureMode(cdp, "on-demand", 0);
+      const result = { label, smoke, onDemand };
+      await Bun.write(outputPath, JSON.stringify(result, null, 2));
+      if (!onDemand.activation?.restoresStaticPreview) {
+        throw new Error(`On Demand lifecycle smoke failed: ${JSON.stringify(result)}`);
+      }
+      console.info(JSON.stringify({ outputPath, ...result }, null, 2));
     } else {
       const full = await measureMode(cdp, "rich", samples);
       const fast = await measureMode(cdp, "lite", samples);
-      const onDemandSupported = await cdp.evaluate(
-        `(() => localStorage.getItem("llm-space-rendering-fidelity") === "on-demand")()`
-      );
-      const onDemand = onDemandSupported
-        ? await measureMode(cdp, "on-demand", samples)
-        : null;
+      const onDemand = await measureMode(cdp, "on-demand", samples);
+      const tabSwitches = await measureTabSwitches(cdp, samples);
       const result = {
         label,
         baseCommit: await git("rev-parse", "main"),
@@ -76,6 +80,7 @@ try {
         full,
         fast,
         onDemand,
+        tabSwitches,
       };
       await Bun.write(outputPath, JSON.stringify(result, null, 2));
       console.info(JSON.stringify({ outputPath, ...result }, null, 2));
@@ -127,17 +132,22 @@ async function prepareApp(cdp) {
   })()`);
   await waitFor(cdp, `document.readyState === "complete"`, 10_000);
   await sleep(500);
+  await dismissDialogs(cdp);
+}
+
+async function dismissDialogs(cdp) {
   await cdp.evaluate(`(async () => {
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       const dialog = document.querySelector('[role="dialog"]');
-      if (!dialog) break;
-      const close = dialog.querySelector('[data-slot="dialog-close"]') ??
-        dialog.querySelector('[aria-label="Close onboarding"]') ??
-        [...dialog.querySelectorAll("button")]
-          .find((button) => button.textContent?.trim() === "Close");
-      close?.click();
-      await sleep(150);
+      if (dialog) {
+        const close = dialog.querySelector('[data-slot="dialog-close"]') ??
+          dialog.querySelector('[aria-label="Close onboarding"]') ??
+          [...dialog.querySelectorAll("button")]
+            .find((button) => button.textContent?.trim() === "Close");
+        close?.click();
+      }
+      await sleep(200);
     }
     return !document.querySelector('[role="dialog"]');
   })()`);
@@ -174,19 +184,26 @@ async function measureMode(cdp, mode, sampleCount) {
     return true;
   })()`);
   await waitFor(cdp, `document.readyState === "complete"`, 10_000);
+  await dismissDialogs(cdp);
   await waitFor(
     cdp,
-    `document.querySelectorAll('[data-message-id]').length >= 54`,
+    `document.querySelector('[data-thread-view-pane-id]:not(.hidden)')?.querySelectorAll('[data-message-id]').length >= 54`,
     30_000
   );
   if (mode === "rich") {
     await waitFor(cdp, `document.querySelectorAll('.cm-editor').length > 0`, 30_000);
+  } else if (mode === "on-demand") {
+    await waitFor(cdp, `document.querySelectorAll('[data-on-demand-preview]').length > 0`, 30_000);
+  } else {
+    await waitFor(cdp, `document.querySelectorAll('textarea').length > 0`, 30_000);
   }
+  await warmThreadViewCache(cdp);
   await sleep(500);
   const counts = await cdp.evaluate(`(() => ({
     dom: document.querySelectorAll("*").length,
     codeMirror: document.querySelectorAll(".cm-editor").length,
     textareas: document.querySelectorAll("textarea").length,
+    onDemandPreviews: document.querySelectorAll("[data-on-demand-preview]").length,
     messages: document.querySelectorAll("[data-message-id]").length,
     mountedThreadViews: document.querySelectorAll("[data-thread-view-pane-id]").length,
   }))()`);
@@ -199,7 +216,92 @@ async function measureMode(cdp, mode, sampleCount) {
     }
     metrics[target] = summarize(values);
   }
-  return { counts, metrics };
+  await dismissDialogs(cdp);
+  const activation =
+    mode === "on-demand" ? await measureOnDemandActivation(cdp) : null;
+  return { counts, metrics, activation };
+}
+
+async function measureOnDemandActivation(cdp) {
+  return cdp.evaluate(`(async () => {
+    const activeView = document.querySelector('[data-thread-view-pane-id]:not(.hidden)');
+    const preview = activeView?.querySelector('[data-on-demand-preview]');
+    if (!preview) return null;
+    const editorsBefore = new Set(activeView.querySelectorAll('.cm-editor'));
+    const previewCountBefore = document.querySelectorAll(
+      '[data-on-demand-preview]'
+    ).length;
+    const started = performance.now();
+    preview.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      pointerType: "mouse",
+    }));
+    let activatedEditor;
+    while (!(activatedEditor = [...activeView.querySelectorAll('.cm-editor')]
+      .find((editor) => !editorsBefore.has(editor)))) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const result = {
+      clickToEditor: performance.now() - started,
+      codeMirrorWhileEditing: document.querySelectorAll('.cm-editor').length,
+    };
+    const editorContent = activatedEditor.querySelector('.cm-content');
+    editorContent?.focus();
+    result.focused = document.activeElement === editorContent;
+    editorContent?.blur();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    result.codeMirrorAfterBlur = document.querySelectorAll('.cm-editor').length;
+    result.previewsAfterBlur = document.querySelectorAll('[data-on-demand-preview]').length;
+    result.restoresStaticPreview =
+      result.focused &&
+      result.codeMirrorAfterBlur === result.codeMirrorWhileEditing - 1 &&
+      result.previewsAfterBlur === previewCountBefore;
+    return result;
+  })()`);
+}
+
+async function warmThreadViewCache(cdp) {
+  for (const threadIndex of [8, 9, 10]) {
+    await measureTabSwitch(cdp, threadIndex);
+  }
+}
+
+async function measureTabSwitches(cdp, sampleCount) {
+  const cached = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    cached.push(await measureTabSwitch(cdp, index % 2 === 0 ? 9 : 10));
+  }
+  const evicted = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    evicted.push(await measureTabSwitch(cdp, index + 1));
+  }
+  return {
+    cached: summarize(cached),
+    evicted: summarize(evicted),
+    mountedViewsAfter: await cdp.evaluate(
+      `document.querySelectorAll('[data-thread-view-pane-id]').length`
+    ),
+  };
+}
+
+async function measureTabSwitch(cdp, threadIndex) {
+  return cdp.evaluate(`(async () => {
+    const threadIndex = ${JSON.stringify(threadIndex)};
+    const title = "benchmark-" + String(threadIndex).padStart(2, "0");
+    const trigger = document.querySelector('[aria-label="' + title + '"]');
+    if (!trigger) return -1;
+    const started = performance.now();
+    trigger.click();
+    while (!document
+      .querySelector('[data-thread-view-pane-id]:not(.hidden)')
+      ?.querySelector('[data-message-id^="benchmark-' + threadIndex + '-message-"]')) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return performance.now() - started;
+  })()`);
 }
 
 async function measureOverlay(cdp, target) {
