@@ -19,7 +19,9 @@ import { Tooltip } from "../tooltip";
 
 import type { CodeEditorHandle, CodeEditorProps } from "./editor";
 import { useRegisterEditorCommit } from "./editor-commit-scope";
+import { OnDemandCodeEditor } from "./on-demand-code-editor";
 
+export type CodeEditorRenderMode = "full" | "on-demand" | "plain";
 export type { CodeEditorHandle, CodeEditorProps } from "./editor";
 
 // CodeMirror is the single heaviest first-paint dependency (~200 kB gzipped) and
@@ -114,6 +116,7 @@ const PlainTextCodeEditor = forwardRef<
     scrollOnFocus,
     value,
     onChange,
+    onBlur,
     onKeyDown,
     onPaste,
     onRetry,
@@ -212,6 +215,7 @@ const PlainTextCodeEditor = forwardRef<
         onBlur={() => {
           focusedRef.current = false;
           commit();
+          onBlur?.();
         }}
         onChange={handleChange}
         onFocus={() => {
@@ -241,14 +245,9 @@ const PlainTextCodeEditor = forwardRef<
   );
 });
 
-export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
-  function CodeEditor(props, ref) {
+const FullCodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
+  function FullCodeEditor(props, ref) {
     const [retryKey, setRetryKey] = useState(0);
-    // "Lite" rendering fidelity: skip CodeMirror and use the lightweight
-    // plain-text editor (a <textarea>) — still editable, just no highlighting.
-    if (props.plain) {
-      return <PlainTextCodeEditor {...props} ref={ref} />;
-    }
     return (
       <CodeEditorErrorBoundary
         resetKey={retryKey}
@@ -265,5 +264,25 @@ export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
         </Suspense>
       </CodeEditorErrorBoundary>
     );
+  }
+);
+
+export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
+  function CodeEditor({ plain, renderMode, ...props }, ref) {
+    const mode: CodeEditorRenderMode =
+      renderMode ?? (plain ? "plain" : "full");
+    if (mode === "plain") {
+      return <PlainTextCodeEditor {...props} ref={ref} />;
+    }
+    if (mode === "on-demand") {
+      return (
+        <OnDemandCodeEditor
+          {...props}
+          ref={ref}
+          FullEditor={FullCodeEditor}
+        />
+      );
+    }
+    return <FullCodeEditor {...props} ref={ref} />;
   }
 );

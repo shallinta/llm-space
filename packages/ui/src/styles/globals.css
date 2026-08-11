@@ -367,6 +367,69 @@ html.lite *::after {
   scroll-behavior: auto !important;
 }
 
+/* Lezer's classHighlighter output used by On Demand message previews. */
+.on-demand-highlight :is(.tok-comment, .tok-punctuation) {
+  color: #6a737d;
+}
+.on-demand-highlight :is(.tok-className, .tok-propertyName, .tok-namespace) {
+  color: #6f42c1;
+}
+.on-demand-highlight
+  :is(.tok-variableName, .tok-number, .tok-operator, .tok-labelName) {
+  color: #005cc5;
+}
+.on-demand-highlight :is(.tok-keyword, .tok-typeName, .tok-macroName) {
+  color: #d73a49;
+}
+.on-demand-highlight
+  :is(.tok-string, .tok-string2, .tok-literal, .tok-meta, .tok-url) {
+  color: #032f62;
+}
+.on-demand-highlight :is(.tok-atom, .tok-bool, .tok-variableName2) {
+  color: #e36209;
+}
+.on-demand-highlight :is(.tok-heading, .tok-strong) {
+  font-weight: 700;
+}
+.on-demand-highlight .tok-emphasis {
+  font-style: italic;
+}
+.on-demand-highlight .tok-link {
+  color: #032f62;
+  text-decoration: underline;
+}
+.on-demand-highlight :is(.tok-deleted, .tok-invalid) {
+  color: #cb2431;
+}
+
+.dark .on-demand-highlight :is(.tok-comment, .tok-punctuation) {
+  color: #8b949e;
+}
+.dark
+  .on-demand-highlight
+  :is(.tok-className, .tok-propertyName, .tok-namespace, .tok-heading) {
+  color: #d2a8ff;
+}
+.dark
+  .on-demand-highlight
+  :is(.tok-variableName, .tok-number, .tok-operator, .tok-labelName) {
+  color: #79c0ff;
+}
+.dark .on-demand-highlight :is(.tok-keyword, .tok-typeName, .tok-macroName) {
+  color: #ff7b72;
+}
+.dark
+  .on-demand-highlight
+  :is(.tok-string, .tok-string2, .tok-literal, .tok-meta, .tok-url, .tok-link) {
+  color: #a5d6ff;
+}
+.dark .on-demand-highlight :is(.tok-atom, .tok-bool, .tok-variableName2) {
+  color: #ffab70;
+}
+.dark .on-demand-highlight :is(.tok-deleted, .tok-invalid) {
+  color: #f97583;
+}
+
 /* Indeterminate progress bar used by the manual "Check for Updates" dialog. */
 @keyframes update-progress {
   0% {

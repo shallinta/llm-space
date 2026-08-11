@@ -14,7 +14,10 @@ import { CircleAlertIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { CodeEditor } from "@llm-space/ui/components/code-editor";
+import {
+  CodeEditor,
+  type CodeEditorRenderMode,
+} from "@llm-space/ui/components/code-editor";
 import { openFirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
 import { useRenderingFidelity } from "@llm-space/ui/components/theme-provider";
 import { Tooltip } from "@llm-space/ui/components/tooltip";
@@ -69,6 +72,12 @@ function _MessageListItem({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { fidelity } = useRenderingFidelity();
+  const editorRenderMode: CodeEditorRenderMode =
+    fidelity === "rich"
+      ? "full"
+      : fidelity === "on-demand"
+        ? "on-demand"
+        : "plain";
   const variableExtension = usePromptVariableExtensionForContext(
     createMessagePromptVariablePlaceKey(message.id),
     context
@@ -282,7 +291,7 @@ function _MessageListItem({
                 hideFocusRing
                 hideBorder
                 scrollOnFocus
-                plain={fidelity === "lite"}
+                renderMode={editorRenderMode}
                 placeholder={
                   placeholder ??
                   `Enter ${message.role === "user" ? "user" : "assistant"} message here`

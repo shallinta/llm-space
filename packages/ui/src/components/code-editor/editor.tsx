@@ -57,6 +57,8 @@ export interface CodeEditorProps {
    * no longer scales with message count.
    */
   plain?: boolean;
+  /** Explicit rendering strategy for repeated editors. */
+  renderMode?: "full" | "on-demand" | "plain";
   language?: "markdown" | "json";
   /**
    * The value is a live streaming preview: syntax highlighting is skipped
@@ -75,6 +77,7 @@ export interface CodeEditorProps {
    */
   extraExtensions?: Extension[];
   onChange?: (value: string) => void;
+  onBlur?: () => void;
   onKeyDown?: (e: KeyboardEvent) => void;
   onPaste?: (e: ClipboardEvent) => void;
 }
@@ -93,6 +96,7 @@ function _CodeEditor(
     readonly,
     extraExtensions,
     onChange,
+    onBlur,
     onKeyDown,
     onPaste,
   }: CodeEditorProps,
@@ -233,7 +237,8 @@ function _CodeEditor(
   const handleBlur = useCallback(() => {
     isFocusedRef.current = false;
     commit();
-  }, [commit]);
+    onBlur?.();
+  }, [commit, onBlur]);
 
   const handleFocus = useCallback(() => {
     isFocusedRef.current = true;

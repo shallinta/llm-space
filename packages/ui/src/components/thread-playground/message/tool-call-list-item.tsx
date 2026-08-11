@@ -22,6 +22,7 @@ import { toast } from "sonner";
 
 import {
   CodeEditor,
+  type CodeEditorRenderMode,
   type CodeEditorProps,
 } from "@llm-space/ui/components/code-editor";
 import { openFirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
@@ -62,6 +63,12 @@ function _ToolCallListItem({
   streaming: boolean;
 }) {
   const { fidelity } = useRenderingFidelity();
+  const editorRenderMode: CodeEditorRenderMode =
+    fidelity === "rich"
+      ? "full"
+      : fidelity === "on-demand"
+        ? "on-demand"
+        : "plain";
   const { presentational } = useHostServices();
   const { updateToolCallOutputText } = useThreadStoreActions();
   const { resolveTool, runToolCall } = useToolCallRunner(messageId);
@@ -246,7 +253,7 @@ function _ToolCallListItem({
         />
         <ToolCallResponseEditor
           input={toolCall.input}
-          plain={fidelity === "lite"}
+          renderMode={editorRenderMode}
           readonly={readonly || isCalling}
           value={outputText}
           extraExtensions={variableExtension}
@@ -284,7 +291,7 @@ function formatJson(value: unknown): string {
  */
 function _ToolCallResponseEditor({
   input,
-  plain,
+  renderMode,
   value,
   readonly,
   extraExtensions,
@@ -292,7 +299,7 @@ function _ToolCallResponseEditor({
   onKeyDown,
 }: {
   input: ToolCallInput;
-  plain: boolean;
+  renderMode: CodeEditorRenderMode;
   value: string;
   readonly: boolean;
   extraExtensions: CodeEditorProps["extraExtensions"];
@@ -330,7 +337,7 @@ function _ToolCallResponseEditor({
       hideBorder
       hideFocusRing
       scrollOnFocus
-      plain={plain}
+      renderMode={renderMode}
       placeholder={`Enter the response of ${input.name}()`}
       readonly={readonly}
       value={value}

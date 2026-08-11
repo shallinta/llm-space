@@ -34,6 +34,7 @@ import {
   EditorCommitScope,
   type EditorCommitScopeHandle,
 } from "@llm-space/ui/components/code-editor/editor-commit-scope";
+import { OnDemandEditorScope } from "@llm-space/ui/components/code-editor/on-demand-code-editor";
 import {
   resolveModelConfig,
   useDefaultModel,
@@ -296,7 +297,9 @@ export function ThreadPlaygroundView({
 }: ThreadPlaygroundViewProps) {
   return (
     <EditorCommitScope onReady={onEditorCommitScopeReady}>
-      <ThreadPlaygroundContent {...props} />
+      <OnDemandEditorScope active={props.active ?? false}>
+        <ThreadPlaygroundContent {...props} />
+      </OnDemandEditorScope>
     </EditorCommitScope>
   );
 }
