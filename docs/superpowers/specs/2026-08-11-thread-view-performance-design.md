@@ -24,6 +24,9 @@ the existing rule that a running tab cannot be closed.
   configurable under General settings.
 - Add an `On Demand` rendering mode that keeps static syntax highlighting while
   mounting CodeMirror only for the active editor.
+- Keep prompt-variable and template-tag highlighting visually consistent
+  between the static preview and CodeMirror without teaching the generic
+  editor about prompt syntax.
 - Reduce global dropdown work for Tools Add and System Prompt Examples without
   regressing pointer, keyboard, or focus behavior.
 - Measure the result against a repeatable baseline using isolated desktop data.
@@ -39,6 +42,11 @@ the existing rule that a running tab cannot be closed.
   modal.
 - On Demand does not map a click in static highlighted DOM to the equivalent
   CodeMirror character offset.
+- Static preview does not implement CodeMirror-only interactions such as
+  variable hover, variable inspection, or autocomplete. Those become available
+  after the editor is activated.
+- This change does not add an editor or renderer extension point to the Plugin
+  manifest.
 
 ## Terminology
 
@@ -229,6 +237,78 @@ variable editing extensions become available after activation. Static preview
 must preserve text selection, copying, wrapping, height caps, placeholder
 display, and visual syntax colors.
 
+### Editor Enhancement Boundary
+
+`CodeEditor` remains the single public facade used by repeated editor surfaces.
+Callers pass semantic `EditorEnhancement` values rather than pairing raw
+CodeMirror extensions with renderer-specific booleans. The facade selects the
+applicable backend:
+
+- Full compiles visual enhancements to CodeMirror extensions and installs
+  CodeMirror-only enhancements;
+- On Demand preview compiles only visual enhancements to static decorations;
+- On Demand editing installs the same CodeMirror extensions as Full;
+- Fast ignores visual and CodeMirror-only enhancements and retains the plain
+  textarea behavior.
+
+The enhancement model is a discriminated union:
+
+```ts
+type EditorEnhancement =
+  | RegexHighlightEnhancement
+  | RangeHighlightEnhancement
+  | CodeMirrorOnlyEnhancement;
+```
+
+A regex highlight declares one pattern, style, and priority. The editor layer
+adapts that single declaration in two ways: CodeMirror uses a viewport-bounded
+`MatchDecorator`, while Static View scans the settled value and returns generic
+decoration ranges. A range highlight follows the same backend split for
+features whose locations are already known. A CodeMirror-only enhancement owns
+editing or view behavior that has no static equivalent.
+
+This keeps the generic editor independent of prompt semantics. Prompt-specific
+patterns and styles live with the prompt-variable feature; the editor package
+owns only enhancement types, backend adapters, range composition, and rendering.
+Raw `Extension[]` may remain as an explicitly CodeMirror-only escape hatch for
+internal editing behavior, but Static View never attempts to introspect it.
+
+### Prompt Syntax Enhancements
+
+The existing prompt-variable CodeMirror bundle is separated by capability:
+
+1. `prompt-variable-highlight` is a visual regex enhancement for simple
+   `{{variable}}` placeholders;
+2. `prompt-template-tag-highlight` is a visual regex enhancement for
+   `{% ... %}` template tags;
+3. `prompt-syntax-editing` is CodeMirror-only and contains variable hover and
+   inspection, variable selection, `@include` completion, template-tag
+   completion, tooltip placement, and the associated interactive theme.
+
+The first two declarations are the only source of their matching pattern,
+style, and overlap priority. Both rendering backends are generated from those
+declarations, so Full and On Demand preview cannot silently diverge. The third
+enhancement is mounted only with CodeMirror. Static preview intentionally does
+not resolve variable values, load skills, subscribe to a Thread Store, create
+tooltips, or offer completion.
+
+The prompt-variable hook returns a stable `EditorEnhancement[]` for the relevant
+Thread context and prompt place. Existing per-Store and per-place caching is
+retained for resolver-dependent CodeMirror behavior so React renders do not
+reconfigure an active editor or discard its focus and undo state.
+
+CodeMirror must retain its current viewport-bounded matching behavior. Shared
+semantics do not mean sharing the Static View's whole-document scan. Static
+decoration results are memoized by settled value, language, theme, and stable
+enhancement identity.
+
+The model deliberately remains an internal UI contract. A future Plugin
+renderer capability may reuse its declarative pattern/style/priority shape, but
+plugins must not receive raw CodeMirror `Extension[]`, React callbacks, DOM
+handlers, or executable static-decoration providers. Such a Plugin extension
+would require a separate manifest, validation, permission, and compatibility
+design.
+
 ## Non-modal Dropdowns
 
 Set `modal={false}` only on:
@@ -285,6 +365,12 @@ turn actual Dialogs non-modal.
 - On Demand: highlighted preview, safe escaping, pointer/keyboard activation,
   one active repeated editor, blur commit, readonly behavior, and tab
   deactivation.
+- Enhancement parity: prompt variables and template tags use the same declared
+  ranges, styles, and priorities in Full and Static preview; overlapping syntax
+  ranges resolve deterministically.
+- Prompt editing behavior: variable hover, inspection, variable and `@include`
+  completion, and template-tag completion remain available after On Demand
+  activation and remain absent from Static preview.
 - Dropdown accessibility: pointer, keyboard, Escape/focus restoration, outside
   dismissal, and menu-to-Dialog focus transfer.
 - Existing running-tab close tests remain unchanged and passing.
