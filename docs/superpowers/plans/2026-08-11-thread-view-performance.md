@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bound mounted Thread views without stopping their sessions, add an On Demand syntax-highlighted editor mode, make two ordinary dropdowns non-modal, and quantify the performance change.
+**Goal:** Bound mounted Thread views without stopping their sessions, add an On Demand syntax-highlighted editor mode with shared prompt decorations, make two ordinary dropdowns non-modal, and quantify the performance change.
 
-**Architecture:** Keep every open Thread's data loading, Zustand store, run loop, event subscription, and persistence in a headless session component keyed by `paneId`. A pure LRU policy controls only the heavy `ThreadPlayground` view children; evicted views commit drafts before unmount and later rebind to the same store. Repeated editors gain a Lezer-rendered preview that mounts CodeMirror only while focused.
+**Architecture:** Keep every open Thread's data loading, Zustand store, run loop, event subscription, and persistence in a headless session component keyed by `paneId`. A pure LRU policy controls only the heavy `ThreadPlayground` view children; evicted views commit drafts before unmount and later rebind to the same store. Repeated editors gain a Lezer-rendered preview that mounts CodeMirror only while focused; declarative editor enhancements compile to viewport-bounded CodeMirror decorations or lightweight Static decorations from one prompt-syntax definition.
 
 **Tech Stack:** TypeScript, React 19, Zustand, TanStack Query, CodeMirror 6, Lezer, Radix UI, Bun test, Electrobun CEF/CDP.
 
@@ -23,6 +23,10 @@
 - `packages/ui/src/components/code-editor/static-highlight.ts` — Lezer parsing and highlight-segment generation.
 - `packages/ui/src/components/code-editor/static-highlight.test.ts` — Markdown/JSON segment and plain-text fallback tests.
 - `packages/ui/src/components/code-editor/on-demand-code-editor.tsx` — focusable highlighted preview and single active editor behavior.
+- `packages/ui/src/components/code-editor/editor-enhancement.ts` — CodeMirror-free enhancement contracts, regex factory, and Static decoration collection.
+- `packages/ui/src/components/code-editor/editor-enhancement-codemirror.ts` — lazily loaded adapter from visual enhancements to viewport-bounded CodeMirror extensions.
+- `packages/ui/src/components/code-editor/editor-enhancement.test.ts` — shared declaration, Static range, and CodeMirror adapter parity tests.
+- `packages/ui/src/components/thread-playground/variable/prompt-syntax-enhancements.ts` — prompt-variable and template-tag visual declarations plus CodeMirror-only editing composition.
 - `apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx` — real React pointer, keyboard, blur, readonly, and commit behavior using the repository DOM harness.
 - `scripts/thread-view-performance-benchmark.mjs` — isolated fixture, CDP measurement, and JSON result collection.
 - `docs/performance/thread-view-performance-2026-08.md` — reproducible baseline/final results and analysis.
@@ -34,6 +38,8 @@
 - `packages/ui/src/components/theme-provider.tsx` — accept and persist `on-demand` fidelity.
 - `packages/ui/src/components/code-editor/editor.tsx` — register the live `commit()` callback in an optional View scope.
 - `packages/ui/src/components/code-editor/index.tsx` — select Full, On Demand, or Fast editor implementation.
+- `packages/ui/src/components/thread-playground/variable/prompt-variable-extension.ts` — retain only variable hover, inspection, and prompt autocomplete CodeMirror behavior.
+- `packages/ui/src/components/thread-playground/variable/use-prompt-variable-extension.ts` — return stable prompt-syntax enhancements instead of a raw extension array.
 - `packages/ui/src/components/thread-playground/thread-playground.tsx` — split Session ownership from disposable View rendering.
 - `packages/ui/src/components/thread-playground/message/message-list-item.tsx` — map fidelity to the repeated-editor render mode.
 - `packages/ui/src/components/thread-playground/message/tool-call-list-item.tsx` — apply the same mode to repeated tool content.
@@ -103,7 +109,7 @@ Expected: result JSON includes the tested commit, exact renderer, fixture counts
 Add the environment, commits, fixture definition, and raw baseline summary to
 `docs/performance/thread-view-performance-2026-08.md`. Create a `Final
 comparison` section containing the sentence `Final measurements are added by
-Task 9 after the production changes.`; replace that sentence in Task 9.
+Task 10 after the production changes.`; replace that sentence in Task 10.
 
 - [ ] **Step 5: Commit the benchmark foundation**
 
@@ -441,11 +447,19 @@ Expected: `packages/ui/package.json` and root `bun.lock` change; no duplicate Re
 Define:
 
 ```ts
-const markdown = createHighlightSegments("**bold** and `code`", "markdown");
-expect(markdown.some((segment) => segment.classes.length > 0)).toBe(true);
+const markdown = createHighlightSegments(
+  "**bold** and `code`",
+  "markdown",
+  "dark"
+);
+expect(markdown.some((segment) => segment.style != null)).toBe(true);
 expect(markdown.map((segment) => segment.text).join("")).toBe("**bold** and `code`");
 
-const json = createHighlightSegments('{"unsafe":"<script>"}', "json");
+const json = createHighlightSegments(
+  '{"unsafe":"<script>"}',
+  "json",
+  "dark"
+);
 expect(json.map((segment) => segment.text).join("")).toBe('{"unsafe":"<script>"}');
 ```
 
@@ -477,7 +491,11 @@ Expected: FAIL because `createHighlightSegments` does not exist.
 
 - [ ] **Step 4: Implement Lezer segment generation**
 
-Use `markdownLanguage.parser` and `jsonLanguage.parser` with `highlightTree` and `classHighlighter`. Fill gaps between highlighted ranges with classless segments and merge adjacent segments with equal classes. Preserve the exact original text.
+Use `markdownLanguage.parser` and `jsonLanguage.parser` with `highlightTree` and
+the same GitHub light/dark `TagStyle` declarations as Full CodeMirror. Resolve
+Lezer tags to React-safe inline style objects, fill gaps between highlighted
+ranges, and merge adjacent segments with equal styles. Preserve the exact
+original text.
 
 - [ ] **Step 5: Implement `OnDemandCodeEditor`**
 
@@ -503,7 +521,290 @@ git add packages/ui/package.json bun.lock packages/ui/src/components/code-editor
 git commit -m "feat(ui): add on-demand highlighted editors"
 ```
 
-## Task 8: Make Ordinary Dropdowns Non-modal Without Interaction Regressions
+## Task 8: Unify Prompt Highlighting Through Editor Enhancements
+
+**Files:**
+- Create: `packages/ui/src/components/code-editor/editor-enhancement.ts`
+- Create: `packages/ui/src/components/code-editor/editor-enhancement-codemirror.ts`
+- Create: `packages/ui/src/components/code-editor/editor-enhancement.test.ts`
+- Create: `packages/ui/src/components/thread-playground/variable/prompt-syntax-enhancements.ts`
+- Modify: `packages/ui/src/components/code-editor/editor.tsx`
+- Modify: `packages/ui/src/components/code-editor/index.tsx`
+- Modify: `packages/ui/src/components/code-editor/on-demand-code-editor.tsx`
+- Modify: `packages/ui/src/components/code-editor/static-highlight.ts`
+- Modify: `packages/ui/src/components/code-editor/static-highlight.test.ts`
+- Modify: `packages/ui/src/components/thread-playground/variable/prompt-variable-extension.ts`
+- Modify: `packages/ui/src/components/thread-playground/variable/use-prompt-variable-extension.ts`
+- Modify: `packages/ui/src/components/thread-playground/message/message-list-item.tsx`
+- Modify: `packages/ui/src/components/thread-playground/message/tool-call-list-item.tsx`
+- Modify: `packages/ui/src/components/thread-playground/prompt/system-prompt-editor.tsx`
+- Modify: `apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx`
+- Delete: `packages/ui/src/components/code-editor/prompt-template-highlights.ts`
+
+- [ ] **Step 1: Write failing pure enhancement and parity tests**
+
+Define the expected public contract in `editor-enhancement.test.ts` before the
+module exists:
+
+```ts
+const variable = createRegexHighlightEnhancement({
+  id: "prompt-variable-highlight",
+  pattern: String.raw`\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}`,
+  className: "cm-prompt-variable",
+  style: { color: "var(--cm-variable)", fontWeight: "500" },
+  priority: 10,
+});
+const tag = createRegexHighlightEnhancement({
+  id: "prompt-template-tag-highlight",
+  pattern: String.raw`\{%[-+]?[\s\S]*?[-+]?%\}`,
+  className: "cm-template-tag",
+  style: { color: "var(--cm-template-tag)", fontWeight: "500" },
+  priority: 20,
+});
+
+expect(collectStaticDecorations("{{ name }} {% if ok %}", [variable, tag]))
+  .toEqual([
+    { from: 0, to: 10, style: variable.style, priority: 10 },
+    { from: 11, to: 22, style: tag.style, priority: 20 },
+  ]);
+expect(compileCodeMirrorEnhancements([variable, tag])).toHaveLength(4);
+```
+
+Add cases for multiline tags, repeated variables, no matches, deterministic
+ordering, stable compilation for the same enhancement identity, duplicate IDs,
+an immutable `range-highlight` declaration, and a `code-mirror-only`
+enhancement contributing extensions but no Static decorations. Mount a Full
+editor in the existing DOM harness and assert its DOM contains both
+`.cm-prompt-variable` and `.cm-template-tag` marks.
+
+Extend `static-highlight.test.ts` and the On Demand component test with
+`{{current_date}}\n{% if enabled %}`. Assert Preview reconstructs the exact
+source, applies the declared variable/tag colors, mounts no `.cm-editor`, and
+after activation mounts CodeMirror with both mark classes.
+
+- [ ] **Step 2: Run the focused tests and verify RED**
+
+```bash
+bun test packages/ui/src/components/code-editor/editor-enhancement.test.ts packages/ui/src/components/code-editor/static-highlight.test.ts apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx
+```
+
+Expected: FAIL because `editor-enhancement.ts`, its CodeMirror adapter, and the
+`enhancements` CodeEditor prop do not exist.
+
+- [ ] **Step 3: Implement the CodeMirror-free enhancement contract**
+
+Create `editor-enhancement.ts` without a runtime import from any
+`@codemirror/*` package:
+
+```ts
+import type { Extension } from "@codemirror/state";
+import type { CSSProperties } from "react";
+
+export interface RegexHighlightEnhancement {
+  kind: "regex-highlight";
+  id: string;
+  pattern: string;
+  className: string;
+  style: Readonly<CSSProperties>;
+  priority: number;
+}
+
+export interface CodeMirrorOnlyEnhancement {
+  kind: "code-mirror-only";
+  id: string;
+  extensions: readonly Extension[];
+}
+
+export interface RangeHighlightEnhancement {
+  kind: "range-highlight";
+  id: string;
+  className: string;
+  style: Readonly<CSSProperties>;
+  priority: number;
+  getRanges(source: string): readonly { from: number; to: number }[];
+}
+
+export type EditorEnhancement =
+  | RegexHighlightEnhancement
+  | RangeHighlightEnhancement
+  | CodeMirrorOnlyEnhancement;
+
+export interface StaticDecorationRange {
+  from: number;
+  to: number;
+  style: Readonly<CSSProperties>;
+  priority: number;
+}
+```
+
+Export `createRegexHighlightEnhancement()`,
+`createRangeHighlightEnhancement()`, and
+`collectStaticDecorations(source, enhancements)`. The regex factory rejects an
+empty ID, a pattern that does not compile, and patterns that match an empty
+string. The range factory rejects an empty ID and evaluates its provider against
+the current source in each backend. The collector creates a fresh global RegExp
+per regex scan, obtains explicit ranges from range providers, ignores
+CodeMirror-only enhancements, clamps ranges to the source, drops empty ranges,
+and sorts by `from`, then `priority`, then `to`. Duplicate enhancement IDs
+always throw so composition failures are visible.
+
+- [ ] **Step 4: Implement the lazy CodeMirror adapter**
+
+Create `editor-enhancement-codemirror.ts` and keep all runtime CodeMirror
+imports in this module. Export:
+
+```ts
+export function compileCodeMirrorEnhancements(
+  enhancements: readonly EditorEnhancement[]
+): Extension[];
+```
+
+Compile every regex highlight into one viewport-bounded `MatchDecorator` /
+`ViewPlugin` extension plus one `EditorView.theme` extension using its declared
+class and style. Compile a range highlight into a `ViewPlugin` that obtains
+ranges from the current document on creation and `docChanged`, plus the same
+theme adapter; clamp and sort its `DecorationSet`. Flatten CodeMirror-only
+extension arrays unchanged. Cache each compiled pair in a
+`WeakMap<RegexHighlightEnhancement | RangeHighlightEnhancement, Extension[]>`
+so a stable enhancement object produces stable extension identity and does not
+reconfigure an active editor.
+
+Do not make Full CodeMirror consume `collectStaticDecorations()`; that would
+replace its viewport-bounded work with a whole-document scan.
+
+- [ ] **Step 5: Make Static Highlighting consume generic decorations**
+
+Remove `StaticHighlightOptions.highlightPromptTemplates` and all prompt-specific
+imports from `static-highlight.ts`. Change the API to:
+
+```ts
+export function createHighlightSegments(
+  source: string,
+  language: HighlightLanguage,
+  theme: ResolvedTheme,
+  enhancements: readonly EditorEnhancement[] = []
+): HighlightSegment[];
+```
+
+Call `collectStaticDecorations(source, enhancements)` and merge those ranges
+with Lezer ranges using the existing boundary algorithm. Higher numeric
+priority wins when visual ranges overlap; syntax color remains the fallback for
+properties that an overlay does not define. Memoization in
+`OnDemandCodeEditor` depends on value, language, resolved theme, streaming, and
+the stable enhancement-array identity.
+
+- [ ] **Step 6: Route enhancements through the CodeEditor facade**
+
+Replace `highlightPromptTemplates` in `CodeEditorProps` with:
+
+```ts
+enhancements?: readonly EditorEnhancement[];
+```
+
+Keep `extraExtensions?: Extension[]` as a documented CodeMirror-only escape
+hatch for existing internal callers such as citations. In `editor.tsx`, append
+`compileCodeMirrorEnhancements(enhancements ?? [])` before `extraExtensions`.
+Plain mode ignores enhancements. On Demand preview passes enhancements to
+`createHighlightSegments`; when activated, it passes the same enhancements to
+the injected Full editor. Streaming preview continues returning unhighlighted
+text segments.
+
+- [ ] **Step 7: Declare prompt syntax once and separate editor interactions**
+
+Create `prompt-syntax-enhancements.ts` with two module-stable visual values:
+
+```ts
+export const PROMPT_VARIABLE_HIGHLIGHT =
+  createRegexHighlightEnhancement({
+    id: "prompt-variable-highlight",
+    pattern: PROMPT_VARIABLE_PATTERN,
+    className: "cm-prompt-variable",
+    style: PROMPT_VARIABLE_STYLE,
+    priority: 10,
+  });
+
+export const PROMPT_TEMPLATE_TAG_HIGHLIGHT =
+  createRegexHighlightEnhancement({
+    id: "prompt-template-tag-highlight",
+    pattern: PROMPT_TEMPLATE_TAG_PATTERN,
+    className: "cm-template-tag",
+    style: PROMPT_TEMPLATE_TAG_STYLE,
+    priority: 20,
+  });
+```
+
+Move the patterns and styles out of the generic code-editor directory into this
+prompt feature module. Delete the intermediate
+`code-editor/prompt-template-highlights.ts` file.
+
+Remove `placeholderHighlighter`, `templateTagHighlighter`, and their two visual
+theme rules from `prompt-variable-extension.ts`. Keep variable hover and
+inspection, variable selection, `@include` completion, template-tag completion,
+tooltip placement, and interactive tooltip/completion styles. Wrap its result:
+
+```ts
+export function createPromptSyntaxEditingEnhancement(options): EditorEnhancement {
+  return {
+    kind: "code-mirror-only",
+    id: "prompt-syntax-editing",
+    extensions: createPromptVariableEditingExtensions(options),
+  };
+}
+```
+
+- [ ] **Step 8: Return stable enhancements from the prompt hook and migrate callers**
+
+Change the prompt hook to return:
+
+```ts
+[
+  PROMPT_VARIABLE_HIGHLIGHT,
+  PROMPT_TEMPLATE_TAG_HIGHLIGHT,
+  editingEnhancement,
+]
+```
+
+Retain the existing `WeakMap<ThreadStore, Map<string, ...>>` keyed by Store and
+prompt place, but cache the complete stable enhancement array. Snapshot context
+continues using its frozen resolver and has no inspect action. Outside a Thread
+context, return the same stable empty array so prompt syntax is not enabled
+accidentally.
+
+Migrate message text, tool response, and System Prompt call sites from
+`extraExtensions={variableExtension}` plus `highlightPromptTemplates` to
+`enhancements={promptSyntaxEnhancements}`. Message citations remain in
+`extraExtensions` in this change; exposing clickable Static decorations is a
+separate interaction design.
+
+- [ ] **Step 9: Verify prompt editing features did not regress**
+
+Run the focused tests and add DOM assertions after On Demand activation for:
+
+```text
+{{              -> variable list plus @include
+{{@             -> @include completion
+{%              -> if/elif/else/endif/for/endfor/set/raw/endraw completion
+hover {{name}}  -> current value tooltip and inspect action in live threads
+```
+
+Static Preview must have no CodeMirror tooltip, completion list, variable
+resolver call, skill load, or inspect action. Full and activated On Demand must
+retain all existing behavior.
+
+```bash
+bun test packages/ui/src/components/code-editor/editor-enhancement.test.ts packages/ui/src/components/code-editor/static-highlight.test.ts apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx packages/ui/src/components/thread-playground/variable
+```
+
+Expected: PASS.
+
+- [ ] **Step 10: Commit the enhancement refactor**
+
+```bash
+git add packages/ui/src/components/code-editor packages/ui/src/components/thread-playground/variable packages/ui/src/components/thread-playground/message/message-list-item.tsx packages/ui/src/components/thread-playground/message/tool-call-list-item.tsx packages/ui/src/components/thread-playground/prompt/system-prompt-editor.tsx apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx
+git commit -m "refactor(ui): unify editor highlight enhancements"
+```
+
+## Task 9: Make Ordinary Dropdowns Non-modal Without Interaction Regressions
 
 **Files:**
 - Modify: `packages/ui/src/components/thread-playground/tool/tool-list-view.tsx`
@@ -553,7 +854,7 @@ git add packages/ui/src/components/thread-playground/tool/tool-list-view.tsx pac
 git commit -m "perf(ui): make ordinary dropdown menus non-modal"
 ```
 
-## Task 9: Full Verification and Before/After Benchmark
+## Task 10: Full Verification and Before/After Benchmark
 
 **Files:**
 - Modify: `docs/performance/thread-view-performance-2026-08.md`
@@ -561,7 +862,7 @@ git commit -m "perf(ui): make ordinary dropdown menus non-modal"
 - [ ] **Step 1: Run focused lifecycle and rendering tests**
 
 ```bash
-bun test apps/desktop/src/components/thread-tabs/thread-view-cache-size.test.ts apps/desktop/src/components/thread-tabs/thread-view-lru.test.ts apps/desktop/src/app/workspace-model-scope.test.tsx apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx packages/ui/src/components/code-editor/static-highlight.test.ts packages/ui/src/lib/local-storage.test.ts
+bun test apps/desktop/src/components/thread-tabs/thread-view-cache-size.test.ts apps/desktop/src/components/thread-tabs/thread-view-lru.test.ts apps/desktop/src/app/workspace-model-scope.test.tsx apps/desktop/src/components/code-editor/on-demand-code-editor.test.tsx packages/ui/src/components/code-editor/editor-enhancement.test.ts packages/ui/src/components/code-editor/static-highlight.test.ts packages/ui/src/components/thread-playground/variable packages/ui/src/lib/local-storage.test.ts
 ```
 
 Expected: all focused tests pass with zero failures.
@@ -617,7 +918,7 @@ git commit -m "docs(perf): compare thread view rendering performance"
 
 ## Plan Self-review Checklist
 
-- Every design requirement maps to a task: Session/View split (Tasks 4–6), LRU setting and policy (Tasks 2–3), draft safety (Task 5), On Demand and approved copy (Task 7), non-modal menus (Task 8), benchmark and analysis (Tasks 1 and 9).
+- Every design requirement maps to a task: Session/View split (Tasks 4–6), LRU setting and policy (Tasks 2–3), draft safety (Task 5), On Demand and approved copy (Task 7), unified prompt highlight enhancements and CodeMirror-only interactions (Task 8), non-modal menus (Task 9), benchmark and analysis (Tasks 1 and 10).
 - Trace exclusion is explicit in Tasks 3 and 6.
 - Running-tab close protection is explicitly retained and retested in Task 6.
 - Baseline is measured before production changes and final results use the same harness.
