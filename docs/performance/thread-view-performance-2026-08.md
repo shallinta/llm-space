@@ -74,6 +74,32 @@ previews while idle. Activating one took 25.8 ms in the recorded run and added
 exactly one CodeMirror. Moving focus away restored the original three
 CodeMirror instances and all 162 static previews.
 
+### Unified enhancement follow-up
+
+The editor-enhancement refactor was measured again at
+`c26a72aa2d17b1145a88e6354015f2fca982e5a2` with the same CEF renderer,
+10-Thread/54-message fixture, three-View cache, and five overlay samples. Its
+raw output is `/tmp/llm-space-thread-view-enhancement-final-committed.json` for
+this development run.
+
+| Rendering | DOM before | DOM after | Editor resources after |
+| --- | ---: | ---: | --- |
+| Full | 15,199 | 15,199 | 165 CodeMirror |
+| Fast | 9,691 | 9,691 | 3 CodeMirror + 162 textareas |
+| On Demand | 11,959 | 11,797 | 3 CodeMirror + 162 static previews |
+
+The shared Enhancement abstraction did not add a retained editor or DOM cost
+to Full or Fast. On Demand retained 162 fewer DOM nodes (about 1.4%) because
+the Static renderer now emits only style-bearing segments while preserving the
+exact source text. Idle On Demand still mounted no message CodeMirror.
+
+Activation took 27.9 ms in this run, temporarily increased CodeMirror from
+three to four, focused the editing surface, and returned to three CodeMirror
+plus all 162 previews after blur. The earlier single activation sample was
+25.8 ms; the 2.1 ms difference is too small and too sparsely sampled to claim a
+regression. Cached and evicted Tab-switch medians were 54.5 ms and 269.2 ms,
+respectively, with the mounted View count remaining three.
+
 ### Overlay latency
 
 Median click-to-painted time in milliseconds:
