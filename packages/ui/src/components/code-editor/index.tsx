@@ -18,6 +18,7 @@ import { Textarea } from "../../ui/textarea";
 import { Tooltip } from "../tooltip";
 
 import type { CodeEditorHandle, CodeEditorProps } from "./editor";
+import { useRegisterEditorCommit } from "./editor-commit-scope";
 
 export type { CodeEditorHandle, CodeEditorProps } from "./editor";
 
@@ -147,6 +148,7 @@ const PlainTextCodeEditor = forwardRef<
       committedRef.current = draftRef.current;
     }
   }, [onChange]);
+  useRegisterEditorCommit(commit);
 
   const insertText = useCallback(
     (text: string) => {

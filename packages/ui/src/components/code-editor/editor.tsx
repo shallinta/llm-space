@@ -21,6 +21,7 @@ import {
 import { cn } from "../../lib/utils";
 import { useTheme } from "../theme-provider";
 
+import { useRegisterEditorCommit } from "./editor-commit-scope";
 import { createExtensions } from "./extensions";
 import * as themes from "./themes";
 
@@ -183,6 +184,7 @@ function _CodeEditor(
       committedRef.current = draftRef.current;
     }
   }, [onChange]);
+  useRegisterEditorCommit(commit);
 
   const insertText = useCallback(
     (text: string) => {

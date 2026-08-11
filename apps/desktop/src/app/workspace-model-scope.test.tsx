@@ -8,6 +8,11 @@ import type {
   Thread,
 } from "@llm-space/core";
 import {
+  EditorCommitScope,
+  useRegisterEditorCommit,
+  type EditorCommitScopeHandle,
+} from "@llm-space/ui/components/code-editor/editor-commit-scope";
+import {
   ThreadPlaygroundSession,
   ThreadPlaygroundView,
 } from "@llm-space/ui/components/thread-playground";
@@ -21,7 +26,14 @@ import {
   QueryClientProvider,
   useQuery,
 } from "@tanstack/react-query";
-import { act, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import {
+  act,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { runRemoteRuntimeActionIfAllowed } from "@/components/remote-runtime-actions";
@@ -31,6 +43,8 @@ import { switchWorkspaceRuntimeIfAllowed } from "@/components/thread-tabs/runtim
 import { SerializedPersistence } from "@/components/thread-tabs/serialized-persistence";
 import { settleStreamingPane } from "@/components/thread-tabs/settle-streaming-pane";
 import { usePaneRefreshAcknowledgement } from "@/components/thread-tabs/use-pane-refresh-ack";
+import type { AppTab } from "@/components/thread-tabs/use-thread-tabs";
+import { useThreadViewLru } from "@/components/thread-tabs/use-thread-view-lru";
 import type { RuntimeId } from "@/shared/runtime";
 
 import {
@@ -434,6 +448,83 @@ function _ThreadSessionHarness({
   );
 }
 
+function _EditorCommitProbe({
+  editorId,
+  events,
+}: {
+  editorId: string;
+  events: string[];
+}) {
+  const commit = useCallback(() => {
+    events.push(`commit:${editorId}`);
+  }, [editorId, events]);
+  useRegisterEditorCommit(commit);
+  return null;
+}
+
+function _CommitScopeView({
+  events,
+  handles,
+  paneId,
+}: {
+  events: string[];
+  handles: Map<string, EditorCommitScopeHandle>;
+  paneId: string;
+}) {
+  const handleReady = useCallback(
+    (handle: EditorCommitScopeHandle | null) => {
+      if (handle) handles.set(paneId, handle);
+      else handles.delete(paneId);
+    },
+    [handles, paneId]
+  );
+  useEffect(
+    () => () => {
+      events.push(`unmount:${paneId}`);
+    },
+    [events, paneId]
+  );
+  return (
+    <EditorCommitScope onReady={handleReady}>
+      <_EditorCommitProbe editorId={`${paneId}:message`} events={events} />
+      <_EditorCommitProbe editorId={`${paneId}:tool-result`} events={events} />
+    </EditorCommitScope>
+  );
+}
+
+function _ThreadViewLruHarness({
+  activeId,
+  capacity,
+  events,
+  tabs,
+}: {
+  activeId: string;
+  capacity: number;
+  events: string[];
+  tabs: AppTab[];
+}) {
+  const handlesRef = useRef(new Map<string, EditorCommitScopeHandle>());
+  const commitPane = useCallback((paneId: string) => {
+    handlesRef.current.get(paneId)?.commitAll();
+  }, []);
+  const retained = useThreadViewLru({
+    tabs,
+    activeId,
+    capacity,
+    commitPane,
+  });
+  return tabs.map((tab) =>
+    tab.type === "thread" && retained.has(tab.paneId) ? (
+      <_CommitScopeView
+        key={tab.paneId}
+        events={events}
+        handles={handlesRef.current}
+        paneId={tab.paneId}
+      />
+    ) : null
+  );
+}
+
 describe("WorkspaceModelScope", () => {
   test("runtime changes preserve the mounted workspace identity", async () => {
     const clients = new Map<RuntimeId, ModelClient>([
@@ -638,6 +729,56 @@ describe("ThreadPlayground Session/View lifecycle", () => {
       runningStore.getState().thread.context?.messages?.at(-1)?.content
     ).toContainEqual({ type: "text", text: "Completed while hidden" });
     expect(sessionUnmounts).toBe(0);
+  });
+});
+
+describe("Thread View LRU draft commits", () => {
+  const tabs: AppTab[] = ["a", "b"].map((id) => ({
+    id: `thread:${id}`,
+    type: "thread",
+    path: `/${id}.json`,
+    runtimeId: "local",
+    paneId: `pane:${id}`,
+  }));
+
+  test("commits every registered editor before an evicted view unmounts", async () => {
+    const events: string[] = [];
+    const render = (activeId: string) => (
+      <_ThreadViewLruHarness
+        activeId={activeId}
+        capacity={1}
+        events={events}
+        tabs={tabs}
+      />
+    );
+    activeRoot = _createRoot();
+
+    await act(async () => activeRoot?.render(render("thread:a")));
+    await act(async () => activeRoot?.render(render("thread:b")));
+
+    expect(events).toEqual([
+      "commit:pane:a:message",
+      "commit:pane:a:tool-result",
+      "unmount:pane:a",
+    ]);
+  });
+
+  test("does not request a commit when no view is evicted", async () => {
+    const events: string[] = [];
+    const render = (activeId: string) => (
+      <_ThreadViewLruHarness
+        activeId={activeId}
+        capacity={2}
+        events={events}
+        tabs={tabs}
+      />
+    );
+    activeRoot = _createRoot();
+
+    await act(async () => activeRoot?.render(render("thread:a")));
+    await act(async () => activeRoot?.render(render("thread:b")));
+
+    expect(events).toEqual([]);
   });
 });
 

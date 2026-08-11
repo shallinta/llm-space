@@ -31,6 +31,10 @@ import {
 import { usePanelRef } from "react-resizable-panels";
 
 import {
+  EditorCommitScope,
+  type EditorCommitScopeHandle,
+} from "@llm-space/ui/components/code-editor/editor-commit-scope";
+import {
   resolveModelConfig,
   useDefaultModel,
   useFirstAvailableModel,
@@ -165,7 +169,10 @@ export type ThreadPlaygroundViewProps = Omit<
   | "archiveRunSnapshot"
   | "readRunSnapshot"
   | "viewMounted"
->;
+> & {
+  /** Registers the imperative draft-commit boundary for this disposable View. */
+  onEditorCommitScopeReady?: (handle: EditorCommitScopeHandle | null) => void;
+};
 
 export function ThreadPlayground({
   loading,
@@ -283,8 +290,15 @@ function _ThreadPlaygroundSessionStore({
   );
 }
 
-export function ThreadPlaygroundView(props: ThreadPlaygroundViewProps) {
-  return <ThreadPlaygroundContent {...props} />;
+export function ThreadPlaygroundView({
+  onEditorCommitScopeReady,
+  ...props
+}: ThreadPlaygroundViewProps) {
+  return (
+    <EditorCommitScope onReady={onEditorCommitScopeReady}>
+      <ThreadPlaygroundContent {...props} />
+    </EditorCommitScope>
+  );
 }
 
 /** Size the Run history panel expands to when toggled open. */
