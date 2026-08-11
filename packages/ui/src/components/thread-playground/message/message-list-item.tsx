@@ -34,7 +34,7 @@ import {
   useThreadStore,
   useThreadStoreActions,
 } from "../stores";
-import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
+import { usePromptSyntaxEnhancementsForContext } from "../variable/use-prompt-syntax-enhancements";
 
 import { CitationList } from "./citation-list";
 import { ImageContentList } from "./image-content-view";
@@ -78,7 +78,7 @@ function _MessageListItem({
       : fidelity === "on-demand"
         ? "on-demand"
         : "plain";
-  const variableExtension = usePromptVariableExtensionForContext(
+  const promptSyntaxEnhancements = usePromptSyntaxEnhancementsForContext(
     createMessagePromptVariablePlaceKey(message.id),
     context
   );
@@ -90,10 +90,6 @@ function _MessageListItem({
     [message]
   );
   const citationExtension = useTextCitationExtension(assistantTextContents);
-  const editorExtensions = useMemo(
-    () => [...(variableExtension ?? []), ...citationExtension],
-    [citationExtension, variableExtension]
-  );
   const text = useMemo(() => getMessageText(message), [message]);
   const imageContents = useMemo(() => {
     const result: { content: ImageContent; contentIndex: number }[] = [];
@@ -299,7 +295,8 @@ function _MessageListItem({
                 streaming={streaming}
                 readonly={readonly}
                 value={text}
-                extraExtensions={editorExtensions}
+                enhancements={promptSyntaxEnhancements}
+                extraExtensions={citationExtension}
                 onChange={handleTextContentChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}

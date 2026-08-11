@@ -23,6 +23,18 @@ import { OnDemandCodeEditor } from "./on-demand-code-editor";
 
 export type CodeEditorRenderMode = "full" | "on-demand" | "plain";
 export type { CodeEditorHandle, CodeEditorProps } from "./editor";
+export {
+  collectStaticDecorations,
+  createRangeHighlightEnhancement,
+  createRegexHighlightEnhancement,
+} from "./editor-enhancement";
+export type {
+  CodeMirrorOnlyEnhancement,
+  EditorEnhancement,
+  RangeHighlightEnhancement,
+  RegexHighlightEnhancement,
+  StaticDecorationRange,
+} from "./editor-enhancement";
 
 // CodeMirror is the single heaviest first-paint dependency (~200 kB gzipped) and
 // only mounts inside editors, so load it on demand. The surrounding UI and the

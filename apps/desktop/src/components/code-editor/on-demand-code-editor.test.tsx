@@ -5,6 +5,7 @@ import type {
   CodeEditorHandle,
   CodeEditorProps,
 } from "@llm-space/ui/components/code-editor";
+import { createRegexHighlightEnhancement } from "@llm-space/ui/components/code-editor";
 import {
   EditorCommitScope,
   type EditorCommitScopeHandle,
@@ -13,6 +14,7 @@ import {
   OnDemandCodeEditor,
   OnDemandEditorScope,
 } from "@llm-space/ui/components/code-editor/on-demand-code-editor";
+import { ThemeProvider } from "@llm-space/ui/components/theme-provider";
 import {
   act,
   forwardRef,
@@ -33,9 +35,26 @@ const TEST_DOM = installReactTestDom();
 let root: Root | null = null;
 let container: TestElement | null = null;
 
+const PROMPT_HIGHLIGHTS = [
+  createRegexHighlightEnhancement({
+    id: "prompt-variable-highlight",
+    pattern: String.raw`\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}`,
+    className: "cm-prompt-variable",
+    style: { color: "var(--cm-variable)", fontWeight: "500" },
+    priority: 10,
+  }),
+  createRegexHighlightEnhancement({
+    id: "prompt-template-tag-highlight",
+    pattern: String.raw`\{%[-+]?[\s\S]*?[-+]?%\}`,
+    className: "cm-template-tag",
+    style: { color: "var(--cm-template-tag)", fontWeight: "500" },
+    priority: 20,
+  }),
+] as const;
+
 const FakeFullEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
   function FakeFullEditor(
-    { autoFocus, onBlur, onChange, value },
+    { autoFocus, enhancements, onBlur, onChange, value },
     forwardedRef
   ) {
     const elementRef = useRef<HTMLTextAreaElement>(null);
@@ -55,6 +74,7 @@ const FakeFullEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
       <textarea
         ref={elementRef}
         data-testid="full-editor"
+        data-enhancement-count={enhancements?.length ?? 0}
         defaultValue={value}
         onBlur={() => {
           commit();
@@ -77,7 +97,9 @@ function _editor(): TestElement | null {
 }
 
 async function _render(element: React.ReactNode) {
-  await act(async () => root?.render(element));
+  await act(async () =>
+    root?.render(<ThemeProvider>{element}</ThemeProvider>)
+  );
 }
 
 beforeEach(() => {
@@ -96,6 +118,63 @@ afterEach(async () => {
 afterAll(() => TEST_DOM.restore());
 
 describe("OnDemandCodeEditor", () => {
+  test("keeps syntax-highlighted segments in the preformatted text flow", async () => {
+    await _render(
+      <OnDemandEditorScope active>
+        <OnDemandCodeEditor
+          FullEditor={FakeFullEditor}
+          value={'<system-reminder date="2026-08-11">text</system-reminder>'}
+        />
+      </OnDemandEditorScope>
+    );
+
+    const preview = _preview();
+    expect(preview?.children.length).toBeGreaterThan(1);
+    expect(preview?.classList.contains("flex")).toBe(false);
+    expect(preview?.classList.contains("flex-col")).toBe(false);
+  });
+
+  test("uses CodeMirror's 1.4 line height in the static preview", async () => {
+    await _render(
+      <OnDemandEditorScope active>
+        <OnDemandCodeEditor FullEditor={FakeFullEditor} value="line 1\nline 2" />
+      </OnDemandEditorScope>
+    );
+
+    expect(_preview()?.classList.contains("leading-[1.4]")).toBe(true);
+  });
+
+  test("renders prompt-template overlays before CodeMirror is mounted", async () => {
+    await _render(
+      <OnDemandEditorScope active>
+        <OnDemandCodeEditor
+          FullEditor={FakeFullEditor}
+          value="{{current_date}} {% if enabled %}"
+          language="markdown"
+          enhancements={PROMPT_HIGHLIGHTS}
+        />
+      </OnDemandEditorScope>
+    );
+
+    const preview = _preview();
+    const spans = preview?.children ?? [];
+    const variable = spans.find(
+      (span) => span.textContent === "{{current_date}}"
+    );
+    const templateTag = spans.find(
+      (span) => span.textContent === "{% if enabled %}"
+    );
+    expect(variable?.style.color).toBe("var(--cm-variable)");
+    expect(variable?.style.fontWeight).toBe("500");
+    expect(templateTag?.style.color).toBe("var(--cm-template-tag)");
+    expect(templateTag?.style.fontWeight).toBe("500");
+
+    await act(async () => {
+      preview?.dispatchEvent(new TestEvent("pointerdown"));
+    });
+    expect(_editor()?.getAttribute("data-enhancement-count")).toBe("2");
+  });
+
   test.each([
     ["Enter", "Enter"],
     ["Space", " "],

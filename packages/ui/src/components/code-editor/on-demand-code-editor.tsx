@@ -19,10 +19,14 @@ import {
 } from "react";
 
 import { cn } from "../../lib/utils";
+import { useTheme } from "../theme-provider";
 
 import type { CodeEditorHandle, CodeEditorProps } from "./editor";
 import { useRegisterEditorCommit } from "./editor-commit-scope";
-import { createHighlightSegments } from "./static-highlight";
+import {
+  createHighlightSegments,
+  getGithubThemeForeground,
+} from "./static-highlight";
 
 interface ActiveEditor {
   id: string;
@@ -96,6 +100,7 @@ export const OnDemandCodeEditor = forwardRef<
     FullEditor,
     autoFocus,
     className,
+    enhancements,
     hideBorder,
     hideFocusRing,
     language,
@@ -112,6 +117,7 @@ export const OnDemandCodeEditor = forwardRef<
   forwardedRef
 ) {
   const id = useId();
+  const { resolvedTheme } = useTheme();
   const coordinator = useContext(OnDemandEditorContext);
   const editorRef = useRef<CodeEditorHandle>(null);
   const previewRef = useRef<HTMLPreElement>(null);
@@ -202,9 +208,20 @@ export const OnDemandCodeEditor = forwardRef<
   const segments = useMemo(
     () =>
       streaming
-        ? [{ text: previewValue, classes: [] }]
-        : createHighlightSegments(previewValue, detectedLanguage),
-    [detectedLanguage, previewValue, streaming]
+        ? [{ text: previewValue }]
+        : createHighlightSegments(
+            previewValue,
+            detectedLanguage,
+            resolvedTheme,
+            enhancements
+          ),
+    [
+      detectedLanguage,
+      enhancements,
+      previewValue,
+      resolvedTheme,
+      streaming,
+    ]
   );
 
   if (editing) {
@@ -216,6 +233,7 @@ export const OnDemandCodeEditor = forwardRef<
         autoFocus
         hideBorder={hideBorder}
         hideFocusRing={hideFocusRing}
+        enhancements={enhancements}
         language={language}
         placeholder={placeholder}
         readonly={readonly}
@@ -246,8 +264,9 @@ export const OnDemandCodeEditor = forwardRef<
       tabIndex={0}
       data-code-editor-mode="on-demand"
       data-on-demand-preview
+      style={{ color: getGithubThemeForeground(resolvedTheme) }}
       className={cn(
-        "on-demand-highlight text-foreground/80 flex cursor-text select-text flex-col overflow-auto rounded-lg border bg-(--textarea) px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap transition-opacity outline-none",
+        "on-demand-highlight cursor-text select-text overflow-auto rounded-lg border bg-(--textarea) px-3 py-2 font-mono text-sm leading-[1.4] break-words whitespace-pre-wrap transition-opacity outline-none",
         !hideFocusRing && "focus-visible:border-ring!",
         hideBorder && "border-transparent",
         readonly && "cursor-text opacity-67",
@@ -267,7 +286,7 @@ export const OnDemandCodeEditor = forwardRef<
             // Segments are deterministic for one source; offset-free keys are
             // sufficient because the preview is replaced wholesale on edits.
             key={index}
-            className={segment.classes.join(" ") || undefined}
+            style={segment.style}
           >
             {segment.text}
           </span>

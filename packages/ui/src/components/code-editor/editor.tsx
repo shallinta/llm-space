@@ -22,6 +22,8 @@ import { cn } from "../../lib/utils";
 import { useTheme } from "../theme-provider";
 
 import { useRegisterEditorCommit } from "./editor-commit-scope";
+import type { EditorEnhancement } from "./editor-enhancement";
+import { compileCodeMirrorEnhancements } from "./editor-enhancement-codemirror";
 import { createExtensions } from "./extensions";
 import * as themes from "./themes";
 
@@ -76,6 +78,12 @@ export interface CodeEditorProps {
    * (Lite) fallback. Pass a stable reference to avoid reconfiguring the editor.
    */
   extraExtensions?: Extension[];
+  /**
+   * Semantic editor features shared by Full and On Demand renderers. Visual
+   * enhancements compile to both backends; CodeMirror-only enhancements are
+   * installed only while the full editor is mounted. Keep this array stable.
+   */
+  enhancements?: readonly EditorEnhancement[];
   onChange?: (value: string) => void;
   onBlur?: () => void;
   onKeyDown?: (e: KeyboardEvent) => void;
@@ -94,6 +102,7 @@ function _CodeEditor(
     value,
     streaming,
     readonly,
+    enhancements,
     extraExtensions,
     onChange,
     onBlur,
@@ -277,9 +286,10 @@ function _CodeEditor(
   const extensions = useMemo(
     () => [
       ...createExtensions(streaming ? "none" : detectedLanguage),
+      ...compileCodeMirrorEnhancements(enhancements ?? []),
       ...(extraExtensions ?? []),
     ],
-    [detectedLanguage, extraExtensions, streaming]
+    [detectedLanguage, enhancements, extraExtensions, streaming]
   );
   return (
     <div

@@ -35,7 +35,7 @@ import { Button } from "@llm-space/ui/ui/button";
 import { Input } from "@llm-space/ui/ui/input";
 
 import { useThreadStore, useThreadStoreActions } from "../stores";
-import { usePromptVariableExtensionForContext } from "../variable/use-prompt-variable-extension";
+import { usePromptSyntaxEnhancementsForContext } from "../variable/use-prompt-syntax-enhancements";
 
 import { ImageContentView } from "./image-content-view";
 import { ToolCallInputView } from "./tool-call-input-view";
@@ -72,7 +72,7 @@ function _ToolCallListItem({
   const { presentational } = useHostServices();
   const { updateToolCallOutputText } = useThreadStoreActions();
   const { resolveTool, runToolCall } = useToolCallRunner(messageId);
-  const variableExtension = usePromptVariableExtensionForContext(
+  const promptSyntaxEnhancements = usePromptSyntaxEnhancementsForContext(
     createToolResultPromptVariablePlaceKey(messageId, toolCall.id),
     context
   );
@@ -256,7 +256,7 @@ function _ToolCallListItem({
           renderMode={editorRenderMode}
           readonly={readonly || isCalling}
           value={outputText}
-          extraExtensions={variableExtension}
+          enhancements={promptSyntaxEnhancements}
           onChange={handleOutputChange}
           onKeyDown={handleKeyDown}
         />
@@ -294,7 +294,7 @@ function _ToolCallResponseEditor({
   renderMode,
   value,
   readonly,
-  extraExtensions,
+  enhancements,
   onChange,
   onKeyDown,
 }: {
@@ -302,7 +302,7 @@ function _ToolCallResponseEditor({
   renderMode: CodeEditorRenderMode;
   value: string;
   readonly: boolean;
-  extraExtensions: CodeEditorProps["extraExtensions"];
+  enhancements: CodeEditorProps["enhancements"];
   onChange: (value: string) => void;
   onKeyDown: (event: React.KeyboardEvent) => void;
 }) {
@@ -341,7 +341,7 @@ function _ToolCallResponseEditor({
       placeholder={`Enter the response of ${input.name}()`}
       readonly={readonly}
       value={value}
-      extraExtensions={extraExtensions}
+      enhancements={enhancements}
       onChange={onChange}
       onKeyDown={onKeyDown}
     />
