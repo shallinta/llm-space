@@ -1,8 +1,21 @@
 /* eslint-disable @typescript-eslint/await-thenable, @typescript-eslint/no-empty-function, @typescript-eslint/unbound-method */
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { AgentEvent, AgentTransport, Thread } from "@llm-space/core";
-import type { ModelClient } from "@llm-space/ui/host";
+import type {
+  AgentEvent,
+  AgentTransport,
+  ModelProviderGroup,
+  Thread,
+} from "@llm-space/core";
+import {
+  ThreadPlaygroundSession,
+  ThreadPlaygroundView,
+} from "@llm-space/ui/components/thread-playground";
+import {
+  HostServicesProvider,
+  type HostServices,
+  type ModelClient,
+} from "@llm-space/ui/host";
 import {
   QueryClient,
   QueryClientProvider,
@@ -23,6 +36,8 @@ import type { RuntimeId } from "@/shared/runtime";
 import {
   createThreadStore,
   type ThreadStore,
+  useThreadStore,
+  useThreadStoreApi,
 } from "../../../../packages/ui/src/components/thread-playground/stores";
 import {
   useThreadPlaygroundEvents,
@@ -346,6 +361,79 @@ function _StoreEventBridge({
   return null;
 }
 
+function _ThreadSessionProbe({
+  onStore,
+  onUnmount,
+}: {
+  onStore(store: ThreadStore): void;
+  onUnmount(): void;
+}) {
+  const store = useThreadStoreApi();
+  useEffect(() => {
+    onStore(store);
+    return onUnmount;
+  }, [onStore, onUnmount, store]);
+  return null;
+}
+
+function _ThreadViewProbe({
+  onMessageCount,
+  onUnmount,
+}: {
+  onMessageCount(count: number): void;
+  onUnmount(): void;
+}) {
+  const count = useThreadStore(
+    (state) => state.thread.context?.messages?.length ?? 0
+  );
+  useEffect(() => {
+    onMessageCount(count);
+  }, [count, onMessageCount]);
+  useEffect(() => onUnmount, [onUnmount]);
+  return null;
+}
+
+function _ThreadSessionHarness({
+  host,
+  initialValue,
+  onMessageCount,
+  onSessionStore,
+  onSessionUnmount,
+  onViewUnmount,
+  showView,
+  transport,
+}: {
+  host: HostServices;
+  initialValue: Thread;
+  onMessageCount(count: number): void;
+  onSessionStore(store: ThreadStore): void;
+  onSessionUnmount(): void;
+  onViewUnmount(): void;
+  showView: boolean;
+  transport?: AgentTransport;
+}) {
+  return (
+    <HostServicesProvider value={host}>
+      <ThreadPlaygroundSession
+        initialValue={initialValue}
+        runtimeId="local"
+        transport={transport}
+      >
+        <_ThreadSessionProbe
+          onStore={onSessionStore}
+          onUnmount={onSessionUnmount}
+        />
+        {showView ? (
+          <_ThreadViewProbe
+            onMessageCount={onMessageCount}
+            onUnmount={onViewUnmount}
+          />
+        ) : null}
+      </ThreadPlaygroundSession>
+    </HostServicesProvider>
+  );
+}
+
 describe("WorkspaceModelScope", () => {
   test("runtime changes preserve the mounted workspace identity", async () => {
     const clients = new Map<RuntimeId, ModelClient>([
@@ -407,6 +495,149 @@ describe("WorkspaceModelScope", () => {
       local: 1,
       "remote:server-1": 1,
     });
+  });
+});
+
+describe("ThreadPlayground Session/View lifecycle", () => {
+  test("releasing and remounting a view preserves the exact session store", async () => {
+    const modelProvider = {
+      id: "openai",
+      name: "OpenAI",
+      profiles: [{ id: "default", name: "Default" }],
+      models: [
+        {
+          id: "test-model",
+          name: "Test Model",
+          api: "openai-responses",
+          provider: "openai",
+          baseUrl: "https://example.test/v1",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 1000,
+          maxTokens: 100,
+        },
+      ],
+    } as ModelProviderGroup;
+    const client: ModelClient = {
+      ..._client(),
+      availableModels: async () => [modelProvider],
+    };
+    const createClient = () => client;
+    const streamStarted = _deferred();
+    const releaseStream = _deferred();
+    const transport: AgentTransport = async function* () {
+      streamStarted.resolve();
+      await releaseStream.promise;
+      yield* [
+        _event({
+          type: "message_start",
+          message: { role: "assistant" },
+        }),
+        _event({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+        }),
+        _event({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            contentIndex: 0,
+            delta: "Completed while hidden",
+          },
+        }),
+        _event({
+          type: "message_end",
+          message: { role: "assistant" },
+        }),
+      ];
+    };
+    const host = {
+      executeTool: null,
+      files: {},
+      skills: {},
+    } as HostServices;
+    const initialValue: Thread = {
+      model: { provider: "openai", id: "test-model" },
+      context: {
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            content: [{ type: "text", text: "Run" }],
+          },
+        ],
+      },
+    };
+    let sessionStore: ThreadStore | null = null;
+    let firstStore: ThreadStore | null = null;
+    let sessionUnmounts = 0;
+    let viewUnmounts = 0;
+    const messageCounts: number[] = [];
+    const onSessionStore = (store: ThreadStore) => {
+      sessionStore = store;
+      firstStore ??= store;
+    };
+    const onSessionUnmount = () => {
+      sessionUnmounts += 1;
+    };
+    const onViewUnmount = () => {
+      viewUnmounts += 1;
+    };
+    const onMessageCount = (count: number) => {
+      messageCounts.push(count);
+    };
+    const render = (showView: boolean) => (
+      <WorkspaceModelScope
+        runtimeId="local"
+        createClient={createClient}
+      >
+        <_ThreadSessionHarness
+          host={host}
+          initialValue={initialValue}
+          onMessageCount={onMessageCount}
+          onSessionStore={onSessionStore}
+          onSessionUnmount={onSessionUnmount}
+          onViewUnmount={onViewUnmount}
+          showView={showView}
+          transport={transport}
+        />
+      </WorkspaceModelScope>
+    );
+    activeRoot = _createRoot();
+
+    await act(async () => {
+      activeRoot?.render(render(true));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(typeof ThreadPlaygroundView).toBe("function");
+    expect(firstStore).not.toBeNull();
+    const runningStore = sessionStore as ThreadStore | null;
+    if (!runningStore) throw new Error("Thread session did not mount");
+
+    const runPromise = runningStore.getState().run();
+    await streamStarted.promise;
+
+    await act(async () => activeRoot?.render(render(false)));
+    expect({ sessionUnmounts, viewUnmounts }).toEqual({
+      sessionUnmounts: 0,
+      viewUnmounts: 1,
+    });
+
+    await act(async () => {
+      releaseStream.resolve();
+      await runPromise;
+    });
+    expect(runningStore.getState().status).toBe("idle");
+
+    await act(async () => activeRoot?.render(render(true)));
+    expect(sessionStore).toBe(firstStore);
+    expect(messageCounts.at(-1)).toBe(2);
+    expect(
+      runningStore.getState().thread.context?.messages?.at(-1)?.content
+    ).toContainEqual({ type: "text", text: "Completed while hidden" });
+    expect(sessionUnmounts).toBe(0);
   });
 });
 

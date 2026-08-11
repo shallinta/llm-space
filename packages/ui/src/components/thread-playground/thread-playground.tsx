@@ -136,6 +136,37 @@ export interface ThreadPlaygroundProps {
   readRunSnapshot?: (snapshotRef: string) => Promise<ThreadSnapshot>;
 }
 
+export interface ThreadPlaygroundSessionProps {
+  initialValue: Thread;
+  /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
+  transport?: AgentTransport;
+  /** Runtime that owns this session and every run it starts. */
+  runtimeId?: string;
+  /** Recreate the store without tying its lifetime to the disposable View. */
+  storeKey?: string | number;
+  children?: ReactNode;
+  onChange?: (thread: Thread) => void;
+  onStreamingStart?: (runId: string) => boolean | void;
+  onStreamingEnd?: (runId: string) => void;
+  archiveRunSnapshot?: (
+    run: ThreadRunSnapshot & { id: string }
+  ) => Promise<ThreadRunReference>;
+  readRunSnapshot?: (snapshotRef: string) => Promise<ThreadSnapshot>;
+}
+
+export type ThreadPlaygroundViewProps = Omit<
+  ThreadPlaygroundProps,
+  | "initialValue"
+  | "transport"
+  | "storeKey"
+  | "onChange"
+  | "onStreamingStart"
+  | "onStreamingEnd"
+  | "archiveRunSnapshot"
+  | "readRunSnapshot"
+  | "viewMounted"
+>;
+
 export function ThreadPlayground({
   loading,
   initialValue,
@@ -156,38 +187,52 @@ export function ThreadPlayground({
     throw new Error("initialValue is required when not loading");
   }
   return (
-    <_ThreadPlayground
-      className={className}
+    <ThreadPlaygroundSession
       initialValue={initialValue}
-      viewMounted={viewMounted}
-      {...props}
-    />
+      transport={props.transport}
+      runtimeId={props.runtimeId}
+      storeKey={props.storeKey}
+      onChange={props.onChange}
+      onStreamingStart={props.onStreamingStart}
+      onStreamingEnd={props.onStreamingEnd}
+      archiveRunSnapshot={props.archiveRunSnapshot}
+      readRunSnapshot={props.readRunSnapshot}
+    >
+      {viewMounted ? (
+        <ThreadPlaygroundView
+          {...props}
+          className={className}
+          runtimeId={props.runtimeId ?? "local"}
+        />
+      ) : null}
+    </ThreadPlaygroundSession>
   );
 }
 
-function _ThreadPlayground({ storeKey, ...props }: ThreadPlaygroundProps) {
+export function ThreadPlaygroundSession({
+  storeKey,
+  ...props
+}: ThreadPlaygroundSessionProps) {
   const providers = useModels();
   const profileSelections = useProviderProfileSelections(providers);
   return (
     <ProviderProfileSelectionProvider value={profileSelections}>
-      <_ThreadPlaygroundStore key={storeKey} {...props} />
+      <_ThreadPlaygroundSessionStore key={storeKey} {...props} />
     </ProviderProfileSelectionProvider>
   );
 }
 
-function _ThreadPlaygroundStore({
+function _ThreadPlaygroundSessionStore({
   initialValue,
   transport,
   runtimeId,
-  onApplyCompaction,
-  viewMounted = true,
+  children,
   onChange,
   onStreamingStart,
   onStreamingEnd,
   archiveRunSnapshot,
   readRunSnapshot,
-  ...props
-}: ThreadPlaygroundProps) {
+}: ThreadPlaygroundSessionProps) {
   const [ownerRuntimeId] = useState(() => runtimeId ?? "local");
   // Keep live refs to the provider list and default model so the store can
   // resolve a thread's model (its own, else the default/first available) at
@@ -233,15 +278,13 @@ function _ThreadPlaygroundStore({
   });
   return (
     <ThreadStoreContext.Provider value={store}>
-      {viewMounted ? (
-        <ThreadPlaygroundContent
-          runtimeId={ownerRuntimeId}
-          onApplyCompaction={onApplyCompaction}
-          {...props}
-        />
-      ) : null}
+      {children}
     </ThreadStoreContext.Provider>
   );
+}
+
+export function ThreadPlaygroundView(props: ThreadPlaygroundViewProps) {
+  return <ThreadPlaygroundContent {...props} />;
 }
 
 /** Size the Run history panel expands to when toggled open. */
