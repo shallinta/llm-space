@@ -50,7 +50,7 @@ try {
       const dropdowns = await smokeDropdowns(cdp);
       const result = { label, smoke, dropdowns };
       await Bun.write(outputPath, JSON.stringify(result, null, 2));
-      if (!dropdowns.toolsAdd.nonModal || !dropdowns.examples.nonModal) {
+      if (!dropdownPasses(dropdowns.toolsAdd) || !dropdownPasses(dropdowns.examples)) {
         throw new Error(
           `Dropdown smoke expected non-modal menus: ${JSON.stringify(result)}`
         );
@@ -127,12 +127,19 @@ async function prepareApp(cdp) {
   })()`);
   await waitFor(cdp, `document.readyState === "complete"`, 10_000);
   await sleep(500);
-  await cdp.evaluate(`(() => {
-    const dialog = document.querySelector('[role="dialog"]');
-    const close = dialog && [...dialog.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Close");
-    close?.click();
-    return true;
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const dialog = document.querySelector('[role="dialog"]');
+      if (!dialog) break;
+      const close = dialog.querySelector('[data-slot="dialog-close"]') ??
+        dialog.querySelector('[aria-label="Close onboarding"]') ??
+        [...dialog.querySelectorAll("button")]
+          .find((button) => button.textContent?.trim() === "Close");
+      close?.click();
+      await sleep(150);
+    }
+    return !document.querySelector('[role="dialog"]');
   })()`);
 }
 
@@ -155,7 +162,7 @@ async function openFixtureThreads(cdp) {
   }
   await waitFor(
     cdp,
-    `document.querySelectorAll('[data-message-id]').length >= 54`,
+    `document.querySelector('[data-thread-view-pane-id]:not(.hidden)')?.querySelectorAll('[data-message-id]').length >= 54`,
     20_000
   );
 }
@@ -181,7 +188,7 @@ async function measureMode(cdp, mode, sampleCount) {
     codeMirror: document.querySelectorAll(".cm-editor").length,
     textareas: document.querySelectorAll("textarea").length,
     messages: document.querySelectorAll("[data-message-id]").length,
-    mountedThreadViews: Math.ceil(document.querySelectorAll("[data-message-id]").length / 54),
+    mountedThreadViews: document.querySelectorAll("[data-thread-view-pane-id]").length,
   }))()`);
   const metrics = {};
   for (const target of ["settings", "toolsAdd", "examples", "variables"]) {
@@ -225,21 +232,22 @@ async function measureOverlay(cdp, target) {
     closeOpen();
     await sleep(100);
     const target = ${JSON.stringify(target)};
+    const activeView = document.querySelector('[data-thread-view-pane-id]:not(.hidden)');
     let trigger;
     let selector;
     if (target === "settings") {
       trigger = document.querySelector('[aria-label="Settings"]');
       selector = '[role="dialog"]';
     } else if (target === "toolsAdd") {
-      trigger = [...document.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
+      trigger = [...activeView.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
         .find((button) => button.textContent?.trim() === "Add");
       selector = '[data-slot="dropdown-menu-content"]';
     } else if (target === "examples") {
-      trigger = [...document.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
+      trigger = [...activeView.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
         .find((button) => button.textContent?.trim() === "Examples");
       selector = '[data-slot="dropdown-menu-content"]';
     } else {
-      trigger = [...document.querySelectorAll("button")]
+      trigger = [...activeView.querySelectorAll("button")]
         .find((button) => button.textContent?.trim() === "Add" && button.dataset.slot === "button");
       selector = '[role="dialog"]';
     }
@@ -280,24 +288,129 @@ async function smokeDropdowns(cdp) {
       }
     };
     const inspect = async (label) => {
-      const trigger = [...document.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
+      const activeView = document.querySelector('[data-thread-view-pane-id]:not(.hidden)');
+      const trigger = [...activeView.querySelectorAll('button[data-slot="dropdown-menu-trigger"]')]
         .find((button) => button.textContent?.trim() === label);
+      const appRoot = document.querySelector("#root") ?? document.body.firstElementChild;
+      const before = {
+        rootAriaHidden: appRoot?.getAttribute("aria-hidden"),
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        bodyInlineOverflow: document.body.style.overflow,
+        bodyScrollLocked: document.body.hasAttribute("data-scroll-locked"),
+      };
+      trigger.focus();
+      const triggerFocusedBeforeOpen = document.activeElement === trigger;
       fire(trigger);
       await sleep(100);
       const menu = document.querySelector('[data-slot="dropdown-menu-content"]');
-      const appRoot = document.querySelector("#root") ?? document.body.firstElementChild;
-      const bodyLocked = getComputedStyle(document.body).overflow === "hidden";
+      const activeAfterOpen = document.activeElement?.textContent?.trim() ?? null;
+      const after = {
+        rootAriaHidden: appRoot?.getAttribute("aria-hidden"),
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        bodyInlineOverflow: document.body.style.overflow,
+        bodyScrollLocked: document.body.hasAttribute("data-scroll-locked"),
+      };
       const result = {
         opens: Boolean(menu),
-        nonModal: appRoot?.getAttribute("aria-hidden") !== "true" && !bodyLocked,
+        nonModal:
+          after.rootAriaHidden !== "true" &&
+          !after.bodyScrollLocked &&
+          after.bodyInlineOverflow === before.bodyInlineOverflow,
+        before,
+        after,
+        documentFocused: document.hasFocus(),
+        triggerFocusedBeforeOpen,
+        activeAfterOpen,
       };
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await sleep(50);
+      const escapeTarget = document.activeElement ?? menu ?? document;
+      escapeTarget.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      escapeTarget.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
+      await sleep(150);
       result.escapeRestoresTrigger = document.activeElement === trigger;
+      result.activeAfterEscape = document.activeElement?.textContent?.trim() ?? null;
+      result.escapeCloses = !document.querySelector('[data-slot="dropdown-menu-content"]');
+
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      await sleep(100);
+      const keyboardMenu = document.querySelector('[data-slot="dropdown-menu-content"]');
+      const initialKeyboardFocus = document.activeElement;
+      initialKeyboardFocus?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      );
+      await sleep(50);
+      const firstItemFocus = document.activeElement;
+      firstItemFocus?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      );
+      await sleep(50);
+      const secondItemFocus = document.activeElement;
+      result.keyboardOpens = Boolean(keyboardMenu);
+      result.keyboardFocusesMenu = Boolean(
+        keyboardMenu?.contains(firstItemFocus)
+      );
+      result.arrowNavigation =
+        firstItemFocus !== secondItemFocus &&
+        Boolean(keyboardMenu?.contains(secondItemFocus));
+      secondItemFocus?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+      await sleep(150);
+      result.keyboardEscapeRestoresTrigger = document.activeElement === trigger;
+
+      trigger.focus();
+      fire(trigger);
+      await sleep(100);
+      activeView.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" })
+      );
+      await sleep(100);
+      result.outsideDismisses = !document.querySelector(
+        '[data-slot="dropdown-menu-content"]'
+      );
+
+      trigger.focus();
+      fire(trigger);
+      await sleep(100);
+      const selectionMenu = document.querySelector('[data-slot="dropdown-menu-content"]');
+      const selection = label === "Add"
+        ? [...selectionMenu.querySelectorAll('[data-slot="dropdown-menu-item"]')]
+            .find((item) => item.textContent?.trim() === "Add Custom Function Tool")
+        : selectionMenu.querySelector('[data-slot="dropdown-menu-item"]');
+      selection?.click();
+      await sleep(150);
+      if (label === "Add") {
+        const dialog = document.querySelector('[role="dialog"]');
+        result.selectionWorks = Boolean(dialog);
+        result.dialogOwnsFocus = Boolean(dialog?.contains(document.activeElement));
+        dialog?.querySelector('[data-slot="dialog-close"]')?.click();
+        await sleep(100);
+      } else {
+        result.selectionWorks = !document.querySelector(
+          '[data-slot="dropdown-menu-content"]'
+        );
+        result.dialogOwnsFocus = true;
+      }
       return result;
     };
     return { toolsAdd: await inspect("Add"), examples: await inspect("Examples") };
   })()`);
+}
+
+function dropdownPasses(result) {
+  return (
+    result.opens &&
+    result.nonModal &&
+    result.escapeCloses &&
+    result.escapeRestoresTrigger &&
+    result.keyboardOpens &&
+    result.keyboardFocusesMenu &&
+    result.arrowNavigation &&
+    result.keyboardEscapeRestoresTrigger &&
+    result.outsideDismisses &&
+    result.selectionWorks &&
+    result.dialogOwnsFocus
+  );
 }
 
 function summarize(values) {
@@ -401,6 +514,7 @@ class CdpClient {
       await client.ready;
       await client.send("Runtime.enable");
       await client.send("Page.enable");
+      await client.send("Page.bringToFront");
       const accessible = await client.evaluate(`(() => {
         try { void localStorage.length; return location.href; }
         catch { return null; }
