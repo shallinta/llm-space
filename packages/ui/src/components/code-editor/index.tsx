@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -128,6 +129,7 @@ const PlainTextCodeEditor = forwardRef<
     scrollOnFocus,
     value,
     onChange,
+    onAutoFocusComplete,
     onBlur,
     onKeyDown,
     onPaste,
@@ -138,10 +140,23 @@ const PlainTextCodeEditor = forwardRef<
   const draftRef = useRef(value);
   const committedRef = useRef(value);
   const focusedRef = useRef(false);
+  const autoFocusCompletedRef = useRef(false);
   // Uncontrolled: the DOM textarea owns its value while the user types, so a
   // keystroke writes only to `draftRef` and never re-renders React. External
   // updates and imperative insertions are pushed in by `setDraftValue`.
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    if (!autoFocus) {
+      autoFocusCompletedRef.current = false;
+      return;
+    }
+    const textarea = textareaRef.current;
+    if (!textarea || autoFocusCompletedRef.current) return;
+    textarea.focus();
+    autoFocusCompletedRef.current = true;
+    onAutoFocusComplete?.();
+  }, [autoFocus, onAutoFocusComplete]);
 
   const setDraftValue = useCallback((next: string) => {
     draftRef.current = next;

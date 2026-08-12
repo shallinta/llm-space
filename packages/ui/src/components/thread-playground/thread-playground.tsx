@@ -67,7 +67,10 @@ import { Spinner } from "@llm-space/ui/ui/spinner";
 import { Switch } from "@llm-space/ui/ui/switch";
 
 import { GenerateProjectButton } from "./codegen/generate-project-button";
-import { MessageListView } from "./message/message-list-view";
+import {
+  MessageListView,
+  type ThreadScrollSnapshot,
+} from "./message/message-list-view";
 import { ThreadPlaygroundSkeleton } from "./misc/skeleton";
 import { TitleEditor, type TitleValidator } from "./misc/title-editor";
 import { ModelConfigEditor } from "./model/model-config-editor";
@@ -98,6 +101,8 @@ import { useThreadPlaygroundEvents } from "./use-thread-playground-events";
 import { listEnabledPromptVariableSkills } from "./variable/prompt-variable-skills";
 import { PromptVariablesListView } from "./variable/prompt-variables-list-view";
 
+export type { ThreadScrollSnapshot } from "./message/message-list-view";
+
 export interface ThreadPlaygroundProps {
   className?: string;
   path: string;
@@ -117,10 +122,14 @@ export interface ThreadPlaygroundProps {
    * Whether this playground belongs to the active tab. Only the active one
    * registers the `runThread` command handler (the command registry keeps a
    * single handler per type), so a global run always targets the active tab.
-   */
+  */
   active?: boolean;
   /** Mount the visual workbench while keeping its owner and store alive. */
   viewMounted?: boolean;
+  /** View-local scroll position restored after an LRU remount. */
+  initialScrollSnapshot?: ThreadScrollSnapshot | null;
+  /** Records the latest active-to-inactive scroll snapshot. */
+  onScrollSnapshotChange?: (snapshot: ThreadScrollSnapshot) => void;
   /** The streaming transport used by runs (e.g. HTTP or Electrobun RPC). */
   transport?: AgentTransport;
   /** Runtime that owns this playground. Used to route tool calls. */
@@ -320,6 +329,8 @@ function ThreadPlaygroundContent({
   readonly: readonlyFromProps = false,
   active = false,
   compactImages = false,
+  initialScrollSnapshot,
+  onScrollSnapshotChange,
 }: Omit<
   ThreadPlaygroundProps,
   "initialValue" | "onChange" | "onStreamingStart" | "onStreamingEnd"
@@ -672,6 +683,9 @@ function ThreadPlaygroundContent({
                 readonly={readonly}
                 compactImages={compactImages}
                 measurementsFrozen={!active && !presentational}
+                active={active}
+                initialScrollSnapshot={initialScrollSnapshot}
+                onScrollSnapshotChange={onScrollSnapshotChange}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

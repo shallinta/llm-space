@@ -122,6 +122,7 @@ function _MessageListItem({
   );
   const {
     addMessageImageContent,
+    consumePendingAutoFocusMessage,
     insertMessageBefore,
     run,
     updateMessageTextContent,
@@ -141,6 +142,9 @@ function _MessageListItem({
     },
     [updateMessageTextContent, message.id]
   );
+  const handleAutoFocusComplete = useCallback(() => {
+    consumePendingAutoFocusMessage(message.id);
+  }, [consumePendingAutoFocusMessage, message.id]);
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
       if (message.role !== "user") {
@@ -284,6 +288,9 @@ function _MessageListItem({
               <CodeEditor
                 className="max-h-[40vh] min-h-9.5 w-full bg-transparent"
                 autoFocus={autoFocus}
+                onAutoFocusComplete={
+                  autoFocus ? handleAutoFocusComplete : undefined
+                }
                 hideFocusRing
                 hideBorder
                 scrollOnFocus

@@ -20,7 +20,15 @@ import { CSS } from "@dnd-kit/utilities";
 import type { AssistantMessage, Message, ThreadContext } from "@llm-space/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PlusIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { cn } from "@llm-space/ui/lib/utils";
 import { Button } from "@llm-space/ui/ui/button";
@@ -46,6 +54,87 @@ const MESSAGE_ESTIMATED_HEIGHT = 240;
 const MESSAGE_OVERSCAN = 3;
 const DND_MODIFIERS = [restrictToVerticalAxis];
 
+export interface ThreadScrollSnapshot {
+  messageId: string | null;
+  offset: number;
+  scrollTop: number;
+}
+
+export interface ScrollAnchorMeasurement {
+  id: string;
+  top: number;
+  bottom: number;
+}
+
+export function captureThreadScrollSnapshotFromMeasurements(
+  scrollTop: number,
+  viewportTop: number,
+  anchors: readonly ScrollAnchorMeasurement[]
+): ThreadScrollSnapshot {
+  const anchor = anchors.find(({ bottom }) => bottom > viewportTop);
+  return {
+    messageId: anchor?.id ?? null,
+    offset: anchor ? anchor.top - viewportTop : 0,
+    scrollTop,
+  };
+}
+
+export function resolveThreadScrollTop(
+  snapshot: ThreadScrollSnapshot,
+  currentScrollTop: number,
+  viewportTop: number,
+  anchors: readonly ScrollAnchorMeasurement[]
+): number {
+  const anchor = anchors.find(({ id }) => id === snapshot.messageId);
+  return anchor
+    ? currentScrollTop + anchor.top - viewportTop - snapshot.offset
+    : snapshot.scrollTop;
+}
+
+function _getScrollViewport(content: HTMLElement | null): HTMLElement | null {
+  return (
+    content?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
+    null
+  );
+}
+
+function _measureMessageAnchors(content: HTMLElement): ScrollAnchorMeasurement[] {
+  return Array.from(
+    content.querySelectorAll<HTMLElement>("[data-message-id]")
+  ).map((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      id: element.dataset.messageId ?? "",
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+  });
+}
+
+function _captureThreadScrollSnapshot(
+  viewport: HTMLElement,
+  content: HTMLElement
+): ThreadScrollSnapshot {
+  return captureThreadScrollSnapshotFromMeasurements(
+    viewport.scrollTop,
+    viewport.getBoundingClientRect().top,
+    _measureMessageAnchors(content)
+  );
+}
+
+function _restoreThreadScrollSnapshot(
+  snapshot: ThreadScrollSnapshot,
+  viewport: HTMLElement,
+  content: HTMLElement
+): void {
+  viewport.scrollTop = resolveThreadScrollTop(
+    snapshot,
+    viewport.scrollTop,
+    viewport.getBoundingClientRect().top,
+    _measureMessageAnchors(content)
+  );
+}
+
 export function MessageListView({
   className,
   context: contextFromProps,
@@ -53,6 +142,9 @@ export function MessageListView({
   readonly: readonlyFromProps = false,
   compactImages = false,
   measurementsFrozen = false,
+  active = false,
+  initialScrollSnapshot = null,
+  onScrollSnapshotChange,
 }: {
   className?: string;
   context?: ThreadContext;
@@ -62,21 +154,21 @@ export function MessageListView({
   compactImages?: boolean;
   /** Keep measured heights while an ancestor is hidden. */
   measurementsFrozen?: boolean;
+  /** Whether this live Thread View is currently visible. */
+  active?: boolean;
+  /** One-shot View-local position restored after an LRU remount. */
+  initialScrollSnapshot?: ThreadScrollSnapshot | null;
+  /** Captures position when the View leaves the active state. */
+  onScrollSnapshotChange?: (snapshot: ThreadScrollSnapshot) => void;
 }) {
   const isSnapshotView = messagesFromProps !== undefined;
-  const status = useThreadStore((state) => state.status);
-  const collapsedMessageIds = useThreadStore(
-    (state) => state.collapsedMessageIds
+  const status = useThreadStore((s) => s.status);
+  const collapsedMessageIds = useThreadStore((s) => s.collapsedMessageIds);
+  const pendingAutoFocusMessageId = useThreadStore(
+    (s) => s.pendingAutoFocusMessageId
   );
-  const autoFocusMessageId = useThreadStore(
-    (state) => state.autoFocusMessageId
-  );
-  const runValidationIssue = useThreadStore(
-    (state) => state.runValidationIssue
-  );
-  const storeMessages = useThreadStore(
-    (state) => state.thread.context?.messages
-  );
+  const runValidationIssue = useThreadStore((s) => s.runValidationIssue);
+  const storeMessages = useThreadStore((s) => s.thread.context?.messages);
   const { appendMessage, moveMessage, resolveRunValidationIssue } =
     useThreadStoreActions();
   const [dragging, setDragging] = useState(false);
@@ -186,6 +278,7 @@ export function MessageListView({
     },
     [messageIds, moveMessage]
   );
+  const restoredScrollRef = useRef(false);
   const scrollToBottom = useCallback(() => {
     const viewport = getScrollElement();
     if (viewport) {
@@ -216,16 +309,16 @@ export function MessageListView({
     }
   }, [status, scrollToBottom]);
   useEffect(() => {
-    if (!autoFocusMessageId) {
+    if (!pendingAutoFocusMessageId) {
       return;
     }
     const index = messages.findIndex(
-      (message) => message.id === autoFocusMessageId
+      (message) => message.id === pendingAutoFocusMessageId
     );
     if (index >= 0) {
       virtualizer.scrollToIndex(index, { align: "auto" });
     }
-  }, [autoFocusMessageId, messages, virtualizer]);
+  }, [messages, pendingAutoFocusMessageId, virtualizer]);
   useEffect(() => {
     if (!runValidationIssue?.messageId) {
       return;
@@ -237,6 +330,44 @@ export function MessageListView({
       virtualizer.scrollToIndex(index, { align: "auto" });
     }
   }, [messages, runValidationIssue, virtualizer]);
+
+  // The active View is always retained. Capture once as it transitions to
+  // inactive, before its ancestor becomes `display: none`; no scroll listener
+  // or Store update is needed while the user scrolls.
+  useLayoutEffect(() => {
+    if (!active || isSnapshotView || !onScrollSnapshotChange) return;
+    const content = contentRef.current;
+    return () => {
+      const viewport = _getScrollViewport(content);
+      if (content && viewport) {
+        onScrollSnapshotChange(
+          _captureThreadScrollSnapshot(viewport, content)
+        );
+      }
+    };
+  }, [active, isSnapshotView, onScrollSnapshotChange]);
+
+  // A retained hidden View keeps its DOM scrollTop. This only does work for a
+  // View recreated after LRU eviction. A newly appended/inserted message owns
+  // focus and scrolling, so its one-shot autofocus takes precedence.
+  useLayoutEffect(() => {
+    if (restoredScrollRef.current || !active || isSnapshotView) return;
+    if (pendingAutoFocusMessageId) {
+      restoredScrollRef.current = true;
+      return;
+    }
+    const content = contentRef.current;
+    const viewport = _getScrollViewport(content);
+    if (initialScrollSnapshot && content && viewport) {
+      _restoreThreadScrollSnapshot(initialScrollSnapshot, viewport, content);
+    }
+    restoredScrollRef.current = true;
+  }, [
+    active,
+    initialScrollSnapshot,
+    isSnapshotView,
+    pendingAutoFocusMessageId,
+  ]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const firstVirtualItem = virtualItems[0];
@@ -285,7 +416,9 @@ export function MessageListView({
                             context={contextFromProps}
                             message={message}
                             readonly={readonly}
-                            autoFocus={message.id === autoFocusMessageId}
+                            autoFocus={
+                              message.id === pendingAutoFocusMessageId
+                            }
                             collapsed={collapsedMessageIdSet.has(message.id)}
                             runValidationIssue={
                               message.id === runValidationIssue?.messageId

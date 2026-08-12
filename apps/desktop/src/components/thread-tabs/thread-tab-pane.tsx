@@ -6,6 +6,7 @@ import {
   ThreadPlayground,
   ThreadPlaygroundSession,
   ThreadPlaygroundView,
+  type ThreadScrollSnapshot,
 } from "@llm-space/ui/components/thread-playground";
 import {
   nextCompactedThreadPath,
@@ -397,6 +398,13 @@ function _ThreadTabPane({
     },
     [onViewCommitScopeReady, paneId]
   );
+  const scrollSnapshotRef = useRef<ThreadScrollSnapshot | null>(null);
+  const handleScrollSnapshotChange = useCallback(
+    (snapshot: ThreadScrollSnapshot) => {
+      scrollSnapshotRef.current = snapshot;
+    },
+    []
+  );
 
   if (loadError) {
     return viewMounted ? (
@@ -445,6 +453,8 @@ function _ThreadTabPane({
             path={path}
             readonly={mutationReserved}
             active={active}
+            initialScrollSnapshot={scrollSnapshotRef.current}
+            onScrollSnapshotChange={handleScrollSnapshotChange}
             runtimeId={runtimeId}
             onApplyCompaction={handleApplyCompaction}
             onRenameTitle={handleRenameTitle}

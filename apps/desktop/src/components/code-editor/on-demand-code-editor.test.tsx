@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- React act callbacks intentionally flush synchronous DOM work */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import type {

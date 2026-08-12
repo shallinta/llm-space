@@ -97,6 +97,13 @@ interface ThreadTabsProps {
   onToggleSidebar?: () => void;
   lifecycleHost: PaneLifecycleHost;
   mutationRevision: number;
+  /** Commit editor-local drafts before a Thread View is evicted. */
+  commitThreadView: (paneId: string) => void;
+  /** Publish each disposable Thread View's current commit boundary. */
+  onViewCommitScopeReady: (
+    paneId: string,
+    handle: EditorCommitScopeHandle | null
+  ) => void;
   onThreadStateChange?: (tabId: string, thread: Thread | null) => void;
   /** Extra content pinned at the right end of the tab strip, before "+". */
   toolbarSlot?: ReactNode;
@@ -128,6 +135,8 @@ export function ThreadTabs({
   onToggleSidebar,
   lifecycleHost,
   mutationRevision,
+  commitThreadView,
+  onViewCommitScopeReady,
   onThreadStateChange,
   toolbarSlot,
 }: ThreadTabsProps) {
@@ -225,26 +234,13 @@ export function ThreadTabs({
   // over the strip can't leak into a later gesture and close the wrong tab.
   // preventDefault also disables middle-click autoscroll on Windows/Linux.
   const middlePressedTabIdRef = useRef<string | null>(null);
-  const threadViewCommitHandlesRef = useRef(
-    new Map<string, EditorCommitScopeHandle>()
-  );
   const [threadViewCacheSize] = useThreadViewCacheSize();
-  const commitThreadView = useCallback((paneId: string) => {
-    threadViewCommitHandlesRef.current.get(paneId)?.commitAll();
-  }, []);
   const retainedThreadViews = useThreadViewLru({
     tabs: paneTabs,
     activeId,
     capacity: threadViewCacheSize,
     commitPane: commitThreadView,
   });
-  const handleViewCommitScopeReady = useCallback(
-    (paneId: string, handle: EditorCommitScopeHandle | null) => {
-      if (handle) threadViewCommitHandlesRef.current.set(paneId, handle);
-      else threadViewCommitHandlesRef.current.delete(paneId);
-    },
-    []
-  );
   const handleMouseDownCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       if (event.button !== 1) return;
@@ -289,7 +285,7 @@ export function ThreadTabs({
           onClose={close}
           consumeDiscardedPane={consumeDiscardedPane}
           onThreadStateChange={onThreadStateChange}
-          onViewCommitScopeReady={handleViewCommitScopeReady}
+          onViewCommitScopeReady={onViewCommitScopeReady}
         />
       ) : (
         <TraceTabPane
@@ -310,11 +306,11 @@ export function ThreadTabs({
       openThread,
       consumeDiscardedPane,
       lifecycleHost,
-      handleViewCommitScopeReady,
       mutationRevision,
       onMove,
       onThreadStateChange,
       onTraceTitleChange,
+      onViewCommitScopeReady,
       retainedThreadViews,
     ]
   );

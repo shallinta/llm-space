@@ -10,6 +10,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -85,6 +86,8 @@ export interface CodeEditorProps {
    */
   enhancements?: readonly EditorEnhancement[];
   onChange?: (value: string) => void;
+  /** Called once the requested autofocus has reached the real editing surface. */
+  onAutoFocusComplete?: () => void;
   onBlur?: () => void;
   onKeyDown?: (e: KeyboardEvent) => void;
   onPaste?: (e: ClipboardEvent) => void;
@@ -105,6 +108,7 @@ function _CodeEditor(
     enhancements,
     extraExtensions,
     onChange,
+    onAutoFocusComplete,
     onBlur,
     onKeyDown,
     onPaste,
@@ -113,9 +117,21 @@ function _CodeEditor(
 ) {
   const { resolvedTheme } = useTheme();
   const cmRef = useRef<ReactCodeMirrorRef>(null);
+  const autoFocusCompletedRef = useRef(false);
   const draftRef = useRef(value);
   const committedRef = useRef(value);
   const isFocusedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!autoFocus) {
+      autoFocusCompletedRef.current = false;
+      return;
+    }
+    const view = cmRef.current?.view;
+    if (!view || autoFocusCompletedRef.current) return;
+    view.focus();
+    autoFocusCompletedRef.current = true;
+    onAutoFocusComplete?.();
+  }, [autoFocus, onAutoFocusComplete]);
   // CodeMirror owns the document while the user types; `syncedValue` only
   // changes when we push an *external* update in (the effect below), so a
   // keystroke never re-renders React or trips react-codemirror's value diff.
